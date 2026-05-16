@@ -1072,6 +1072,26 @@ void Application::SendMcpMessage(const std::string& payload) {
     });
 }
 
+void Application::SendTextChat(const std::string& text) {
+    Schedule([this, text]() {
+        if (!protocol_) return;
+        if (!protocol_->IsAudioChannelOpened()) {
+            auto state = GetDeviceState();
+            if (state != kDeviceStateIdle && state != kDeviceStateConnecting) return;
+            SetDeviceState(kDeviceStateConnecting);
+            if (!protocol_->OpenAudioChannel()) {
+                SetDeviceState(kDeviceStateIdle);
+                return;
+            }
+        }
+        if (GetDeviceState() == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+        }
+        protocol_->SendWakeWordDetected(text);
+        SetDeviceState(kDeviceStateListening);
+    });
+}
+
 void Application::SetAecMode(AecMode mode) {
     aec_mode_ = mode;
     Schedule([this]() {

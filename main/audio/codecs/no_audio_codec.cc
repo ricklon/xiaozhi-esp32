@@ -252,6 +252,24 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
         int32_t value = bit32_buffer[i] >> 12;
         dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
     }
+
+    // RMS level meter — prints once per second to verify mic input
+    static int32_t peak = 0;
+    static int sample_count = 0;
+    for (int i = 0; i < samples; i++) {
+        int32_t v = abs((int32_t)dest[i]);
+        if (v > peak) peak = v;
+    }
+    sample_count += samples;
+    if (sample_count >= input_sample_rate_) {
+        int bars = (peak * 40) / 32768;
+        char meter[42] = {};
+        for (int i = 0; i < bars && i < 40; i++) meter[i] = '|';
+        ESP_LOGW(TAG, "MIC peak=%5d [%-40s]", (int)peak, meter);
+        peak = 0;
+        sample_count = 0;
+    }
+
     return samples;
 }
 
