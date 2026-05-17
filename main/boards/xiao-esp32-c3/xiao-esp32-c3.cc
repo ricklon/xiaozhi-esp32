@@ -13,7 +13,41 @@
 
 #define TAG "XiaoEsp32C3"
 
-// Reads lines from USB serial (stdin) and forwards them to the chat pipeline.
+// Handles a completed serial line.
+// "!wifi SSID PASSWORD" adds a network to NVS.
+// "!wifi list"          prints all saved networks.
+// "!wifi clear"         removes all saved networks.
+// Anything else is forwarded to the chat pipeline.
+static void HandleSerialLine(const char* buf) {
+    auto& ssid_manager = SsidManager::GetInstance();
+    if (strncmp(buf, "!wifi ", 6) == 0) {
+        const char* args = buf + 6;
+        if (strcmp(args, "list") == 0) {
+            const auto& list = ssid_manager.GetSsidList();
+            printf("Saved networks (%d):\r\n", (int)list.size());
+            for (int i = 0; i < (int)list.size(); i++) {
+                printf("  [%d] %s\r\n", i, list[i].ssid.c_str());
+            }
+        } else if (strcmp(args, "clear") == 0) {
+            ssid_manager.Clear();
+            printf("All networks cleared.\r\n");
+        } else {
+            // Expect "SSID PASSWORD"
+            char ssid[64] = {}, pass[64] = {};
+            if (sscanf(args, "%63s %63s", ssid, pass) == 2) {
+                ssid_manager.AddSsid(std::string(ssid), std::string(pass));
+                printf("Added: %s\r\n", ssid);
+            } else {
+                printf("Usage: !wifi SSID PASSWORD\r\n");
+            }
+        }
+        fflush(stdout);
+        return;
+    }
+    Application::GetInstance().SendTextChat(std::string(buf));
+}
+
+// Reads lines from USB serial (stdin) and dispatches them.
 // A line is terminated by '\n' or '\r'. Empty lines are ignored.
 static void SerialInputTask(void* arg) {
     char buf[256];
@@ -29,7 +63,7 @@ static void SerialInputTask(void* arg) {
             fflush(stdout);
             if (pos > 0) {
                 buf[pos] = '\0';
-                Application::GetInstance().SendTextChat(std::string(buf, pos));
+                HandleSerialLine(buf);
                 pos = 0;
             }
             continue;
@@ -86,9 +120,17 @@ private:
 
 public:
     XiaoEsp32C3Board() : boot_button_(BOOT_BUTTON_GPIO) {
+        struct { const char* ssid; const char* pass; } known[] = WIFI_NETWORKS;
         auto& ssid_manager = SsidManager::GetInstance();
-        if (ssid_manager.GetSsidList().empty()) {
-            ssid_manager.AddSsid(WIFI_SSID, WIFI_PASSWORD);
+        for (int i = 0; known[i].ssid != nullptr; i++) {
+            const auto& list = ssid_manager.GetSsidList();
+            bool found = false;
+            for (const auto& item : list) {
+                if (item.ssid == known[i].ssid) { found = true; break; }
+            }
+            if (!found) {
+                ssid_manager.AddSsid(known[i].ssid, known[i].pass);
+            }
         }
         InitializeButtons();
         InitializeSerialInput();

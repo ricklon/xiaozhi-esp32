@@ -15,9 +15,12 @@
 #define AUDIO_I2S_GPIO_DOUT   GPIO_NUM_2
 #define AUDIO_I2S_GPIO_DIN    GPIO_NUM_5
 
-// Wi-Fi credentials (provisioned at first boot, stored in NVS)
-#define WIFI_SSID     "dogeden-5g"
-#define WIFI_PASSWORD "rumi1234mayim"
+// Known Wi-Fi networks — all are stored in NVS at boot, device tries each on connect.
+// Add your own networks here, or leave empty and use the serial "!wifi SSID PASSWORD" command.
+// Keep the sentinel {nullptr, nullptr} at the end.
+#define WIFI_NETWORKS { \
+    {nullptr, nullptr} \
+}
 
 // Boot button (XIAO C3 onboard button)
 #define BOOT_BUTTON_GPIO      GPIO_NUM_9
