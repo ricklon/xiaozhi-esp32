@@ -64,17 +64,23 @@ private:
         xTaskCreate(SerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
     }
 
-    // Waits for the device to reach Idle (Standby), then opens the server
-    // connection so the boot button works immediately without typing first.
+    // Watches for Idle (Standby) state and reconnects automatically.
+    // Runs forever so the button works after idle timeouts, not just at boot.
     void InitializeAutoConnect() {
         xTaskCreate([](void*) {
             auto& app = Application::GetInstance();
-            while (app.GetDeviceState() != kDeviceStateIdle) {
+            DeviceState last_state = kDeviceStateUnknown;
+            while (true) {
                 vTaskDelay(pdMS_TO_TICKS(500));
+                DeviceState state = app.GetDeviceState();
+                if (state == kDeviceStateIdle && last_state != kDeviceStateIdle) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    if (app.GetDeviceState() == kDeviceStateIdle) {
+                        app.ToggleChatState();
+                    }
+                }
+                last_state = state;
             }
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            app.ToggleChatState();
-            vTaskDelete(nullptr);
         }, "auto_connect", 4096, nullptr, 3, nullptr);
     }
 
