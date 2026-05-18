@@ -7,12 +7,13 @@
 #define AUDIO_INPUT_SAMPLE_RATE   16000
 #define AUDIO_OUTPUT_SAMPLE_RATE  16000
 
-// External I2S audio — requires a PDM/I2S mic (e.g. MSM261S) and I2S amp (e.g. MAX98357A)
-// Wire: BCLK→GPIO1, LRC→GPIO2, DOUT(speaker)→GPIO3, DIN(mic)→GPIO4
+// External I2S audio — same physical pad positions as XIAO ESP32-C3 setup.
+// XIAO S3 pads: D0=GPIO1, D1=GPIO2, D2=GPIO3, D3=GPIO4
+// Wire: D0(GPIO1)→DOUT(speaker), D1(GPIO2)→BCLK, D2(GPIO3)→WS/LRC, D3(GPIO4)→DIN(mic)
 #define AUDIO_I2S_GPIO_MCLK   GPIO_NUM_NC
-#define AUDIO_I2S_GPIO_WS     GPIO_NUM_2
-#define AUDIO_I2S_GPIO_BCLK   GPIO_NUM_1
-#define AUDIO_I2S_GPIO_DOUT   GPIO_NUM_3
+#define AUDIO_I2S_GPIO_WS     GPIO_NUM_3
+#define AUDIO_I2S_GPIO_BCLK   GPIO_NUM_2
+#define AUDIO_I2S_GPIO_DOUT   GPIO_NUM_1
 #define AUDIO_I2S_GPIO_DIN    GPIO_NUM_4
 
 // Boot button (XIAO S3 onboard button, active-low)
