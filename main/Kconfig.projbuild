@@ -155,6 +155,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_XIAO_ESP32C3
         bool "Seeed XIAO ESP32-C3"
         depends on IDF_TARGET_ESP32C3
+    config BOARD_TYPE_XIAO_ESP32S3_SENSE
+        bool "Seeed XIAO ESP32-S3 Sense (with OV2640 camera)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ESP_KORVO2_V3
         bool "Espressif Korvo2 V3"
         depends on IDF_TARGET_ESP32S3
