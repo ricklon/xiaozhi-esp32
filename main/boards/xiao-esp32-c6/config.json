@@ -1,0 +1,13 @@
+{
+    "manufacturer": "Seeed Studio",
+    "target": "esp32c6",
+    "builds": [{
+        "name": "xiao-esp32-c6",
+        "sdkconfig_append": [
+            "CONFIG_BOARD_TYPE_XIAO_ESP32C6=y",
+            "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y",
+            "CONFIG_LANGUAGE_EN_US=y",
+            "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y"
+        ]
+    }]
+}
