@@ -41,11 +41,13 @@ public:
         // Set DC1 to 3.3V
         WriteReg(0x82, (3300 - 1500) / 100);
 
-        // Set ALDO1 to 3.3V
+        // Set ALDO1 to 3.3V (MIC)
         WriteReg(0x92, (3300 - 500) / 100);
+        // Set ALDO2 to 3.3V (display panel power)
+        WriteReg(0x93, (3300 - 500) / 100);
 
-        // Enable ALDO1(MIC)
-        WriteReg(0x90, 0x01);
+        // Enable ALDO1 and ALDO2
+        WriteReg(0x90, 0x03);
     
         WriteReg(0x64, 0x02); // CV charger voltage setting to 4.1V
         
@@ -84,17 +86,15 @@ public:
         SpiLcdDisplay::SetupUI();
 
         DisplayLockGuard lock(this);
-        lv_obj_set_style_pad_left(status_bar_, LV_HOR_RES * 0.1, 0);
-        lv_obj_set_style_pad_right(status_bar_, LV_HOR_RES * 0.1, 0);
 
-        // Audio level meter — 5 bars just below the status bar, hidden until listening
+        // Audio level meter — 5 bars in top-right corner, hidden until listening
         lv_obj_t* screen = lv_scr_act();
         audio_meter_ = lv_obj_create(screen);
         lv_obj_set_size(audio_meter_, kBarCount * kBarW + (kBarCount - 1) * kBarGap, kBarMaxH);
         lv_obj_set_style_bg_opa(audio_meter_, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(audio_meter_, 0, 0);
         lv_obj_set_style_pad_all(audio_meter_, 0, 0);
-        lv_obj_align(audio_meter_, LV_ALIGN_TOP_MID, 0, 40);
+        lv_obj_align(audio_meter_, LV_ALIGN_TOP_RIGHT, -8, 8);
         lv_obj_add_flag(audio_meter_, LV_OBJ_FLAG_HIDDEN);
 
         for (int i = 0; i < kBarCount; i++) {
@@ -358,6 +358,10 @@ private:
     // Monitors device state and VAD; updates the audio meter on the display.
     void InitializeAudioMonitor() {
         xTaskCreate([](void* arg) {
+            // Wait for Application to fully start before polling device state.
+            // Without this delay the task spins before the main loop runs,
+            // starving IDLE1 and triggering the task watchdog.
+            vTaskDelay(pdMS_TO_TICKS(5000));
             auto* board = static_cast<WaveshareEsp32s3TouchAMOLED1inch8*>(arg);
             auto& app = Application::GetInstance();
             DeviceState last_state = kDeviceStateUnknown;
