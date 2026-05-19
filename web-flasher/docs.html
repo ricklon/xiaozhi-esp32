@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XiaoZhi — Build Guide</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1f2e;
+      --border:   #2d3748;
+      --text:     #e2e8f0;
+      --muted:    #94a3b8;
+      --dim:      #64748b;
+      --blue:     #3b82f6;
+      --green:    #22c55e;
+      --yellow:   #eab308;
+      --red:      #f87171;
+      --code-bg:  #0f1117;
+      --code-fg:  #7dd3fc;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+
+    /* ── nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(15,17,23,.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: .6rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: .82rem;
+      white-space: nowrap;
+      transition: color .15s;
+    }
+    nav a:hover { color: var(--text); }
+    nav .home {
+      color: var(--blue);
+      font-weight: 600;
+      margin-right: .5rem;
+    }
+    nav .sep { color: var(--border); }
+
+    /* ── layout ── */
+    .page { max-width: 820px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+
+    h1 { font-size: 2rem; font-weight: 700; color: #fff; }
+    h2 {
+      font-size: 1.3rem; font-weight: 700; color: #fff;
+      margin: 3rem 0 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    h2:first-of-type { border-top: none; margin-top: 2rem; }
+    h3 { font-size: 1rem; font-weight: 600; color: var(--text); margin: 1.5rem 0 .5rem; }
+    p  { color: var(--muted); margin-bottom: .75rem; }
+    p strong { color: var(--text); }
+    li { color: var(--muted); margin-bottom: .35rem; }
+    li strong { color: var(--text); }
+    ul, ol { padding-left: 1.4rem; margin-bottom: .75rem; }
+
+    code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: .1rem .4rem;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: .85em;
+      color: var(--code-fg);
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin: .75rem 0 1rem;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: .85rem;
+      color: #cbd5e1;
+    }
+    pre code .c { color: #475569; }  /* comment */
+    pre code .k { color: #7dd3fc; }  /* keyword */
+    pre code .s { color: #86efac; }  /* string */
+
+    /* ── callout ── */
+    .callout {
+      border-radius: 8px;
+      padding: .85rem 1rem;
+      margin: 1rem 0;
+      font-size: .9rem;
+      display: flex;
+      gap: .65rem;
+    }
+    .callout.warn  { background: #1c1a09; border: 1px solid #854d0e; color: #fef08a; }
+    .callout.info  { background: #0c1a2e; border: 1px solid #1d4ed8; color: #93c5fd; }
+    .callout.tip   { background: #0a1f12; border: 1px solid #15803d; color: #86efac; }
+    .callout .icon { font-size: 1rem; flex-shrink: 0; line-height: 1.5; }
+
+    /* ── parts table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: .75rem 0 1rem;
+      font-size: .88rem;
+    }
+    th {
+      text-align: left;
+      background: #131720;
+      color: var(--muted);
+      font-weight: 600;
+      padding: .55rem .75rem;
+      border: 1px solid var(--border);
+    }
+    td {
+      padding: .55rem .75rem;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      vertical-align: top;
+    }
+    td strong { color: var(--text); }
+    tr:hover td { background: #1a1f2e44; }
+
+    /* ── wiring grid ── */
+    .wiring-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      margin: 1rem 0;
+    }
+    @media (max-width: 560px) { .wiring-grid { grid-template-columns: 1fr; } }
+
+    .wiring-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+    }
+    .wiring-card h4 {
+      font-size: .9rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: .75rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .wiring-card table { margin: 0; font-size: .82rem; }
+    .wiring-card th, .wiring-card td {
+      padding: .35rem .5rem;
+    }
+    .pin-xiao  { color: #7dd3fc; font-weight: 600; }
+    .pin-part  { color: #86efac; }
+    .pin-note  { color: #64748b; font-size: .78rem; }
+
+    /* ── command table ── */
+    .cmd-table td:first-child {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      color: var(--code-fg);
+      white-space: nowrap;
+      font-size: .83rem;
+    }
+
+    /* ── chip badges ── */
+    .badge {
+      display: inline-block;
+      font-size: .72rem;
+      font-weight: 600;
+      padding: .15rem .45rem;
+      border-radius: 4px;
+      vertical-align: middle;
+      margin-left: .35rem;
+    }
+    .badge-c3  { background: #1e3a5f; color: #7dd3fc; }
+    .badge-c6  { background: #1e3a5f; color: #93c5fd; }
+    .badge-s3  { background: #1f3027; color: #86efac; }
+
+    /* ── section link ── */
+    h2 a, h3 a { color: inherit; text-decoration: none; }
+    h2:hover a::after, h3:hover a::after { content: " #"; color: var(--dim); font-size: .8em; }
+
+    .flash-link {
+      display: inline-block;
+      margin-top: 2.5rem;
+      padding: .65rem 1.5rem;
+      background: var(--blue);
+      color: #fff;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: .95rem;
+    }
+    .flash-link:hover { background: #2563eb; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="home">&#8592; Flash a Board</a>
+  <span class="sep">|</span>
+  <a href="#overview">Overview</a>
+  <a href="#parts">Parts</a>
+  <a href="#wiring">Wiring</a>
+  <a href="#assembly">Assembly</a>
+  <a href="#commands">Commands</a>
+  <a href="#server">Server Setup</a>
+</nav>
+
+<div class="page">
+
+  <h1>XiaoZhi Build Guide</h1>
+  <p style="margin-top:.5rem">Everything you need to build, wire, and connect a XiaoZhi voice assistant device.</p>
+
+  <!-- ═══════════════════════════════════════════════ OVERVIEW -->
+  <h2 id="overview"><a href="#overview">Project Overview</a></h2>
+
+  <p>
+    <strong>XiaoZhi</strong> is an open-source AI voice assistant that runs on Seeed XIAO ESP32 boards.
+    It connects to a server over WiFi, streams audio to a large language model, and speaks the
+    response back through a speaker — all with sub-second latency on a $5–10 microcontroller.
+  </p>
+
+  <h3>How it works</h3>
+  <ol>
+    <li>The device boots and connects to WiFi.</li>
+    <li>It fetches its configuration (WebSocket URL) from the OTA endpoint on the server.</li>
+    <li>It opens a persistent WebSocket connection to the server.</li>
+    <li>Press the boot button (or wait for auto-connect) to start a conversation.</li>
+    <li>Audio is streamed to the server → transcribed → sent to an LLM → synthesized → streamed back.</li>
+    <li>The S3 Sense board can also take photos and describe what the camera sees.</li>
+  </ol>
+
+  <h3>Supported boards</h3>
+  <table>
+    <tr><th>Board</th><th>Flash</th><th>Audio</th><th>Camera</th><th>Notes</th></tr>
+    <tr>
+      <td><strong>XIAO ESP32-C3</strong></td>
+      <td>4 MB</td>
+      <td>External I2S</td>
+      <td>No</td>
+      <td>Ideal event starter board. Low cost.</td>
+    </tr>
+    <tr>
+      <td><strong>XIAO ESP32-C6</strong></td>
+      <td>4 MB</td>
+      <td>External I2S</td>
+      <td>No</td>
+      <td>WiFi 6, same wiring as C3. Drop-in upgrade.</td>
+    </tr>
+    <tr>
+      <td><strong>XIAO ESP32-S3 Sense</strong></td>
+      <td>8 MB</td>
+      <td>External I2S</td>
+      <td>OV2640 built-in</td>
+      <td>Vision-capable. Ask it to describe what it sees.</td>
+    </tr>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════ PARTS -->
+  <h2 id="parts"><a href="#parts">Parts List</a></h2>
+
+  <h3>Core (required for all boards)</h3>
+  <table>
+    <tr><th>Part</th><th>Description</th><th>Where to buy</th></tr>
+    <tr>
+      <td><strong>XIAO ESP32-C3, C6, or S3 Sense</strong></td>
+      <td>The main microcontroller. Pick one based on your needs.</td>
+      <td>Seeed Studio, LCSC, AliExpress</td>
+    </tr>
+    <tr>
+      <td><strong>INMP441 I2S microphone</strong></td>
+      <td>MEMS microphone breakout. Provides clear voice input.</td>
+      <td>Amazon, LCSC, AliExpress (~$2)</td>
+    </tr>
+    <tr>
+      <td><strong>MAX98357A I2S amplifier</strong></td>
+      <td>3 W Class D amp. Drives a small speaker directly.</td>
+      <td>Adafruit #3006, Amazon, LCSC (~$3)</td>
+    </tr>
+    <tr>
+      <td><strong>Small speaker</strong></td>
+      <td>4 Ω or 8 Ω, 1–3 W. 40 mm diameter works well.</td>
+      <td>Adafruit, Amazon, AliExpress (~$2)</td>
+    </tr>
+    <tr>
+      <td><strong>Breadboard + jumper wires</strong></td>
+      <td>Half-size breadboard and male-to-female jumpers.</td>
+      <td>Anywhere</td>
+    </tr>
+    <tr>
+      <td><strong>USB-C cable</strong></td>
+      <td>For flashing and power.</td>
+      <td>Anywhere</td>
+    </tr>
+  </table>
+
+  <div class="callout warn">
+    <span class="icon">⚠</span>
+    <span>Power the MAX98357A from <strong>5 V (VBUS/VUSB)</strong> — not 3.3 V. On 3.3 V the amp
+    brown-outs under WiFi load and produces crackling audio.</span>
+  </div>
+
+  <h3>Optional</h3>
+  <table>
+    <tr><th>Part</th><th>Description</th></tr>
+    <tr>
+      <td><strong>Small enclosure or 3D-printed case</strong></td>
+      <td>To house the board and speaker once it's working.</td>
+    </tr>
+    <tr>
+      <td><strong>LiPo battery + charger</strong></td>
+      <td>For portable use. The XIAO S3 has an onboard battery connector.</td>
+    </tr>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════ WIRING -->
+  <h2 id="wiring"><a href="#wiring">Wiring</a></h2>
+
+  <p>
+    All three boards use the <strong>same physical pad positions</strong> (D0–D3) for audio.
+    The C3 and C6 share identical GPIO numbers; the S3 Sense is one pin offset.
+  </p>
+
+  <div class="wiring-grid">
+
+    <!-- C3 / C6 -->
+    <div class="wiring-card">
+      <h4>XIAO ESP32-C3 &amp; C6 <span class="badge badge-c3">C3</span><span class="badge badge-c6">C6</span></h4>
+      <table>
+        <tr><th>XIAO pad</th><th>GPIO</th><th>Connect to</th></tr>
+        <tr>
+          <td class="pin-xiao">D0</td>
+          <td>GPIO 2</td>
+          <td class="pin-part">MAX98357A DOUT <span class="pin-note">(speaker data)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">D1</td>
+          <td>GPIO 3</td>
+          <td class="pin-part">BCLK (both chips) <span class="pin-note">(bit clock)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">D2</td>
+          <td>GPIO 4</td>
+          <td class="pin-part">WS / LRC (both chips) <span class="pin-note">(word select)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">D3</td>
+          <td>GPIO 5</td>
+          <td class="pin-part">INMP441 SD <span class="pin-note">(mic data)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">5V / VBUS</td>
+          <td>—</td>
+          <td class="pin-part">MAX98357A VIN <span class="pin-note">(must be 5 V)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">3V3</td>
+          <td>—</td>
+          <td class="pin-part">INMP441 VDD</td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">GND</td>
+          <td>—</td>
+          <td class="pin-part">GND (both chips), INMP441 L/R</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- S3 Sense -->
+    <div class="wiring-card">
+      <h4>XIAO ESP32-S3 Sense <span class="badge badge-s3">S3</span></h4>
+      <table>
+        <tr><th>XIAO pad</th><th>GPIO</th><th>Connect to</th></tr>
+        <tr>
+          <td class="pin-xiao">D0</td>
+          <td>GPIO 1</td>
+          <td class="pin-part">MAX98357A DOUT <span class="pin-note">(speaker data)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">D1</td>
+          <td>GPIO 2</td>
+          <td class="pin-part">BCLK (both chips) <span class="pin-note">(bit clock)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">D2</td>
+          <td>GPIO 3</td>
+          <td class="pin-part">WS / LRC (both chips) <span class="pin-note">(word select)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">D3</td>
+          <td>GPIO 4</td>
+          <td class="pin-part">INMP441 SD <span class="pin-note">(mic data)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">5V / VBUS</td>
+          <td>—</td>
+          <td class="pin-part">MAX98357A VIN <span class="pin-note">(must be 5 V)</span></td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">3V3</td>
+          <td>—</td>
+          <td class="pin-part">INMP441 VDD</td>
+        </tr>
+        <tr>
+          <td class="pin-xiao">GND</td>
+          <td>—</td>
+          <td class="pin-part">GND (both chips), INMP441 L/R</td>
+        </tr>
+      </table>
+      <p style="margin-top:.6rem;font-size:.78rem;color:#475569">Camera is built-in on the Sense version — no extra wiring needed.</p>
+    </div>
+
+  </div>
+
+  <h3>INMP441 microphone connections</h3>
+  <table>
+    <tr><th>INMP441 pin</th><th>Connect to</th><th>Notes</th></tr>
+    <tr><td><strong>VDD</strong></td><td>3.3 V</td><td></td></tr>
+    <tr><td><strong>GND</strong></td><td>GND</td><td></td></tr>
+    <tr><td><strong>SD</strong></td><td>D3 on XIAO</td><td>Serial data out</td></tr>
+    <tr><td><strong>SCK</strong></td><td>D1 on XIAO (BCLK)</td><td>Bit clock</td></tr>
+    <tr><td><strong>WS</strong></td><td>D2 on XIAO (WS/LRC)</td><td>Word select</td></tr>
+    <tr><td><strong>L/R</strong></td><td>GND</td><td>Selects left channel (address)</td></tr>
+  </table>
+
+  <h3>MAX98357A amplifier connections</h3>
+  <table>
+    <tr><th>MAX98357A pin</th><th>Connect to</th><th>Notes</th></tr>
+    <tr><td><strong>VIN</strong></td><td>5 V (VBUS)</td><td><em>Must be 5 V</em> — see warning above</td></tr>
+    <tr><td><strong>GND</strong></td><td>GND</td><td></td></tr>
+    <tr><td><strong>DIN</strong></td><td>D0 on XIAO</td><td>Serial data in</td></tr>
+    <tr><td><strong>BCLK</strong></td><td>D1 on XIAO</td><td>Bit clock</td></tr>
+    <tr><td><strong>LRC</strong></td><td>D2 on XIAO</td><td>Word select / frame sync</td></tr>
+    <tr><td><strong>SD</strong></td><td>Leave floating or tie to 3.3 V</td><td>Shutdown — float = on</td></tr>
+    <tr><td><strong>GAIN</strong></td><td>Leave floating</td><td>Float = 9 dB, GND = 3 dB, VIN = 15 dB</td></tr>
+    <tr><td><strong>OUT+/OUT−</strong></td><td>Speaker terminals</td><td>Polarity does not matter</td></tr>
+  </table>
+
+  <!-- ═══════════════════════════════════════════════ ASSEMBLY -->
+  <h2 id="assembly"><a href="#assembly">Assembly Tips</a></h2>
+
+  <ol>
+    <li>
+      <strong>Flash first, wire after.</strong>
+      Confirm the device boots and connects before adding audio hardware — easier to debug.
+    </li>
+    <li>
+      <strong>Power the MAX98357A from the 5 V pad, not 3.3 V.</strong>
+      The XIAO's 3.3 V regulator cannot supply enough current under WiFi + audio load.
+      Crackling, dropouts, and reboots all disappear when you move to 5 V.
+    </li>
+    <li>
+      <strong>Tie INMP441 L/R to GND.</strong>
+      This selects the left channel. If L/R floats, audio capture will be unreliable.
+    </li>
+    <li>
+      <strong>Keep audio wire runs short (&lt; 10 cm).</strong>
+      Long I2S wires act as antennas and pick up noise. On a breadboard, seat everything close to the XIAO.
+    </li>
+    <li>
+      <strong>Boot button behavior:</strong>
+      <ul>
+        <li><em>Short press during startup</em> → enter WiFi config mode (AP + captive portal)</li>
+        <li><em>Short press when idle</em> → start/stop a conversation</li>
+        <li><em>Long press (2 s)</em> → force WiFi config mode</li>
+      </ul>
+    </li>
+    <li>
+      <strong>Auto-connect:</strong>
+      After a conversation ends and the device returns to idle, it will automatically start a
+      new session after ~1 second. This keeps it always ready without needing a button press.
+    </li>
+  </ol>
+
+  <!-- ═══════════════════════════════════════════════ COMMANDS -->
+  <h2 id="commands"><a href="#commands">Serial Commands</a></h2>
+
+  <p>
+    Open a serial monitor at <strong>115200 baud</strong> and type commands directly.
+    The device echoes your input. Press Enter to send.
+  </p>
+
+  <table class="cmd-table">
+    <tr><th>Command</th><th>Description</th></tr>
+    <tr>
+      <td>!wifi SSID PASSWORD</td>
+      <td>Add a WiFi network. Stored in NVS — survives reboots.</td>
+    </tr>
+    <tr>
+      <td>!wifi list</td>
+      <td>List all saved networks.</td>
+    </tr>
+    <tr>
+      <td>!wifi clear</td>
+      <td>Remove all saved networks.</td>
+    </tr>
+    <tr>
+      <td>!server IP</td>
+      <td>Set server by IP — auto-builds <code>http://IP:8003/xiaozhi/ota/</code> and reboots.</td>
+    </tr>
+    <tr>
+      <td>!server URL</td>
+      <td>Set full OTA URL and reboot.</td>
+    </tr>
+    <tr>
+      <td>!server</td>
+      <td>Show the current OTA URL (no args).</td>
+    </tr>
+    <tr>
+      <td>!status</td>
+      <td>Show firmware version, connected SSID, IP address, OTA URL, free heap.</td>
+    </tr>
+    <tr>
+      <td>!reboot</td>
+      <td>Reboot the device.</td>
+    </tr>
+    <tr>
+      <td>!help</td>
+      <td>Print the command list.</td>
+    </tr>
+    <tr>
+      <td><em>anything else</em></td>
+      <td>Sent as a chat message to the AI — type to the assistant directly.</td>
+    </tr>
+  </table>
+
+  <div class="callout tip">
+    <span class="icon">💡</span>
+    <span>
+      Run <code>!status</code> after booting to confirm the device is on the right network and
+      pointing at the right server before you start troubleshooting audio or AI issues.
+    </span>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ SERVER -->
+  <h2 id="server"><a href="#server">Running Your Own Server</a></h2>
+
+  <p>
+    The server handles WebSocket connections from devices, speech-to-text, LLM calls, and
+    text-to-speech. You can run it on a laptop, a Raspberry Pi, or any machine on the same
+    network as the devices.
+  </p>
+
+  <h3>Requirements</h3>
+  <ul>
+    <li><strong>Python 3.12+</strong> and <strong><a href="https://github.com/astral-sh/uv" style="color:var(--blue)">uv</a></strong> (fast Python package manager)</li>
+    <li><strong>OpenRouter API key</strong> — free tier works; used for LLM + TTS calls</li>
+    <li>The server machine and all devices on the <strong>same WiFi network</strong></li>
+    <li>Ports <strong>8000</strong> (WebSocket) and <strong>8003</strong> (OTA/HTTP) open on the server</li>
+  </ul>
+
+  <h3>Installation</h3>
+  <pre><code><span class="c"># Clone the server repo</span>
+git clone https://github.com/ricklon/xiaozhi-esp32-server
+cd xiaozhi-esp32-server
+
+<span class="c"># Install dependencies with uv</span>
+uv sync</code></pre>
+
+  <h3>Configuration</h3>
+
+  <p>Create <code>.env</code> in the project root:</p>
+  <pre><code>OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code></pre>
+
+  <p>Create <code>data/.config.yaml</code> (replace <code>192.168.X.X</code> with your server's IP):</p>
+  <pre><code>server:
+  websocket: ws://192.168.X.X:8000/xiaozhi/v1/
+  vision_explain: http://192.168.X.X:8003/mcp/vision/explain
+
+prompt: |
+  You are XiaoZhi, a friendly and concise voice assistant on a smart device.
+  Always respond in English.
+  Keep all responses short (1-3 sentences) and conversational.
+  Be helpful, warm, and direct.
+  Current time: {time}</code></pre>
+
+  <div class="callout info">
+    <span class="icon">ℹ</span>
+    <span>
+      The <code>data/.config.yaml</code> file is gitignored — it stays local and never gets
+      committed. Same for <code>.env</code>. Safe to put secrets in both.
+    </span>
+  </div>
+
+  <h3>Finding your server's IP</h3>
+  <pre><code><span class="c"># Linux / macOS</span>
+ip route get 1.1.1.1 | grep -oP 'src \K\S+'
+<span class="c"># or</span>
+hostname -I | awk '{print $1}'</code></pre>
+
+  <h3>Starting the server</h3>
+  <pre><code>uv run python -m app</code></pre>
+
+  <p>You should see output like:</p>
+  <pre><code>INFO: Uvicorn running on http://0.0.0.0:8000
+INFO: OTA server running on http://0.0.0.0:8003</code></pre>
+
+  <h3>Pointing devices at your server</h3>
+  <p>Once the server is running, point each device at it via serial:</p>
+  <pre><code>!server 192.168.X.X</code></pre>
+  <p>
+    The device stores the server IP in NVS and reboots. It will connect to your server from
+    then on — even after power cycles — until you run <code>!server</code> again.
+  </p>
+
+  <h3>LLM model selection</h3>
+  <p>
+    The server defaults to an OpenRouter model. To change it, edit the model name in
+    <code>data/.config.yaml</code> or the server's provider config. Any OpenAI-compatible
+    endpoint works — you can point it at a local Ollama instance if you want fully
+    offline operation.
+  </p>
+
+  <div class="callout tip">
+    <span class="icon">💡</span>
+    <span>
+      For vision (S3 Sense camera), the server needs a model that accepts image input —
+      e.g. <code>google/gemma-3-27b-it</code> via OpenRouter, or any local vision-capable model.
+    </span>
+  </div>
+
+  <a href="index.html" class="flash-link">&#8592; Flash a Board</a>
+
+</div>
+</body>
+</html>
