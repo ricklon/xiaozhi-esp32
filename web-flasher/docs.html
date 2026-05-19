@@ -274,6 +274,13 @@
       <td>OV2640 built-in</td>
       <td>Vision-capable. Ask it to describe what it sees.</td>
     </tr>
+    <tr>
+      <td><strong>Waveshare ESP32-S3-Touch-AMOLED-1.8</strong></td>
+      <td>16 MB</td>
+      <td>ES8311 (onboard)</td>
+      <td>No</td>
+      <td>1.8" 368×448 AMOLED, capacitive touch, LiPo charging. No external wiring — self-contained.</td>
+    </tr>
   </table>
 
   <!-- ═══════════════════════════════════════════════ PARTS -->
@@ -337,9 +344,17 @@
   <h2 id="wiring"><a href="#wiring">Wiring</a></h2>
 
   <p>
-    All three boards use the <strong>same physical pad positions</strong> (D0–D3) for audio.
+    The XIAO boards use an <strong>external I2S mic and amplifier</strong> wired to pads D0–D3.
     The C3 and C6 share identical GPIO numbers; the S3 Sense is one pin offset.
   </p>
+  <div class="callout tip">
+    <span class="icon">💡</span>
+    <span>
+      <strong>Waveshare ESP32-S3-Touch-AMOLED-1.8</strong> — no wiring needed.
+      The microphone, speaker amplifier, display, and LiPo charger are all built onto the board.
+      Flash it and it's ready to use.
+    </span>
+  </div>
 
   <div class="wiring-grid">
 
