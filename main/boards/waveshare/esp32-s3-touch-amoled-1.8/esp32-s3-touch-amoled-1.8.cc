@@ -11,6 +11,7 @@
 #include "power_save_timer.h"
 #include "axp2101.h"
 #include "i2c_device.h"
+#include "xiao_serial_commands.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -69,33 +70,96 @@ static const sh8601_lcd_init_cmd_t vendor_specific_init[] = {
     {0x29, (uint8_t[]){0x00}, 0, 10}
 };
 
-// 在waveshare_amoled_1_8类之前添加新的显示类
 class CustomLcdDisplay : public SpiLcdDisplay {
 public:
     CustomLcdDisplay(esp_lcd_panel_io_handle_t io_handle,
                     esp_lcd_panel_handle_t panel_handle,
-                    int width,
-                    int height,
-                    int offset_x,
-                    int offset_y,
-                    bool mirror_x,
-                    bool mirror_y,
-                    bool swap_xy)
+                    int width, int height,
+                    int offset_x, int offset_y,
+                    bool mirror_x, bool mirror_y, bool swap_xy)
         : SpiLcdDisplay(io_handle, panel_handle,
-                    width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy) {
-        // Note: UI customization should be done in SetupUI(), not in constructor
-        // to ensure lvgl objects are created before accessing them
-    }
+                    width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy) {}
 
     virtual void SetupUI() override {
-        // Call parent SetupUI() first to create all lvgl objects
         SpiLcdDisplay::SetupUI();
 
         DisplayLockGuard lock(this);
         lv_obj_set_style_pad_left(status_bar_, LV_HOR_RES * 0.1, 0);
         lv_obj_set_style_pad_right(status_bar_, LV_HOR_RES * 0.1, 0);
+
+        // Audio level meter — 5 bars just below the status bar, hidden until listening
+        lv_obj_t* screen = lv_scr_act();
+        audio_meter_ = lv_obj_create(screen);
+        lv_obj_set_size(audio_meter_, kBarCount * kBarW + (kBarCount - 1) * kBarGap, kBarMaxH);
+        lv_obj_set_style_bg_opa(audio_meter_, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(audio_meter_, 0, 0);
+        lv_obj_set_style_pad_all(audio_meter_, 0, 0);
+        lv_obj_align(audio_meter_, LV_ALIGN_TOP_MID, 0, 40);
+        lv_obj_add_flag(audio_meter_, LV_OBJ_FLAG_HIDDEN);
+
+        for (int i = 0; i < kBarCount; i++) {
+            audio_bars_[i] = lv_obj_create(audio_meter_);
+            lv_obj_set_style_bg_color(audio_bars_[i], lv_palette_main(LV_PALETTE_LIGHT_BLUE), 0);
+            lv_obj_set_style_bg_opa(audio_bars_[i], LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(audio_bars_[i], 0, 0);
+            lv_obj_set_style_radius(audio_bars_[i], 2, 0);
+            lv_obj_set_size(audio_bars_[i], kBarW, kBarMinH);
+            lv_obj_set_pos(audio_bars_[i], i * (kBarW + kBarGap), kBarMaxH - kBarMinH);
+        }
+
+        // 50 ms timer drives the bar animation; paused until listening starts
+        s_instance_ = this;
+        meter_timer_ = lv_timer_create([](lv_timer_t*) {
+            if (s_instance_) s_instance_->UpdateMeter();
+        }, 50, nullptr);
+        lv_timer_pause(meter_timer_);
+    }
+
+    // Called from the audio-monitor task; safe to call from any RTOS task.
+    void SetAudioMeter(bool listening, bool vad) {
+        DisplayLockGuard lock(this);
+        meter_vad_ = vad;
+        if (listening) {
+            lv_obj_clear_flag(audio_meter_, LV_OBJ_FLAG_HIDDEN);
+            lv_timer_resume(meter_timer_);
+        } else {
+            lv_obj_add_flag(audio_meter_, LV_OBJ_FLAG_HIDDEN);
+            lv_timer_pause(meter_timer_);
+        }
+    }
+
+private:
+    static const int kBarCount = 5;
+    static const int kBarW     = 6;
+    static const int kBarGap   = 5;
+    static const int kBarMaxH  = 28;
+    static const int kBarMinH  = 3;
+
+    lv_obj_t*   audio_meter_           = nullptr;
+    lv_obj_t*   audio_bars_[kBarCount] = {};
+    lv_timer_t* meter_timer_           = nullptr;
+    int         meter_tick_            = 0;
+    volatile bool meter_vad_           = false;
+
+    // Single-instance pointer so the captureless lambda can reach UpdateMeter().
+    static CustomLcdDisplay* s_instance_;
+
+    // Called every 50 ms from the LVGL task via meter_timer_.
+    void UpdateMeter() {
+        // 16-point sine approximation, values 0–100
+        static const uint8_t kWave[16] = {50,71,88,97,100,97,88,71,50,29,12,3,0,3,12,29};
+        meter_tick_ = (meter_tick_ + 1) & 15;
+        const int top = meter_vad_ ? kBarMaxH : kBarMaxH / 4;
+        for (int i = 0; i < kBarCount; i++) {
+            int phase = (meter_tick_ + i * 3) & 15;
+            int h = kBarMinH + (top - kBarMinH) * kWave[phase] / 100;
+            lv_obj_set_size(audio_bars_[i], kBarW, h);
+            lv_obj_set_pos(audio_bars_[i], i * (kBarW + kBarGap), kBarMaxH - h);
+        }
     }
 };
+
+CustomLcdDisplay* CustomLcdDisplay::s_instance_ = nullptr;
 
 class CustomBacklight : public Backlight {
 public:
@@ -287,6 +351,31 @@ private:
         ESP_LOGI(TAG, "Touch panel initialized successfully");
     }
 
+    void InitializeSerialInput() {
+        xTaskCreate(XiaoSerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
+    }
+
+    // Monitors device state and VAD; updates the audio meter on the display.
+    void InitializeAudioMonitor() {
+        xTaskCreate([](void* arg) {
+            auto* board = static_cast<WaveshareEsp32s3TouchAMOLED1inch8*>(arg);
+            auto& app = Application::GetInstance();
+            DeviceState last_state = kDeviceStateUnknown;
+            bool last_vad = false;
+            while (true) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                auto state = app.GetDeviceState();
+                bool listening = (state == kDeviceStateListening);
+                bool vad = listening && app.IsVoiceDetected();
+                if (state != last_state || vad != last_vad) {
+                    board->display_->SetAudioMeter(listening, vad);
+                    last_state = state;
+                    last_vad = vad;
+                }
+            }
+        }, "audio_monitor", 2048, this, 2, nullptr);
+    }
+
     // 初始化工具
     void InitializeTools() {
         auto &mcp_server = McpServer::GetInstance();
@@ -311,6 +400,8 @@ public:
         InitializeTouch();
         InitializeButtons();
         InitializeTools();
+        InitializeSerialInput();
+        InitializeAudioMonitor();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
