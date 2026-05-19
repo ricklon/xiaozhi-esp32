@@ -1,0 +1,17 @@
+{
+  "name": "XiaoZhi — XIAO ESP32-S3 Sense",
+  "version": "1.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "firmware/s3/bootloader.bin",       "offset": 0 },
+        { "path": "firmware/s3/partition-table.bin",  "offset": 32768 },
+        { "path": "firmware/s3/ota_data_initial.bin", "offset": 53248 },
+        { "path": "firmware/s3/xiaozhi.bin",           "offset": 131072 },
+        { "path": "firmware/s3/generated_assets.bin",  "offset": 6291456 }
+      ]
+    }
+  ]
+}
