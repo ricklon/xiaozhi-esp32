@@ -1,80 +1,13 @@
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
 #include "display/display.h"
-#include "application.h"
 #include "button.h"
 #include "config.h"
-#include "ssid_manager.h"
+#include "xiao_serial_commands.h"
 
 #include <esp_log.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <stdio.h>
 
 #define TAG "XiaoEsp32C3"
-
-// Handles a completed serial line.
-// "!wifi SSID PASSWORD" adds a network to NVS.
-// "!wifi list"          prints all saved networks.
-// "!wifi clear"         removes all saved networks.
-// Anything else is forwarded to the chat pipeline.
-static void HandleSerialLine(const char* buf) {
-    auto& ssid_manager = SsidManager::GetInstance();
-    if (strncmp(buf, "!wifi ", 6) == 0) {
-        const char* args = buf + 6;
-        if (strcmp(args, "list") == 0) {
-            const auto& list = ssid_manager.GetSsidList();
-            printf("Saved networks (%d):\r\n", (int)list.size());
-            for (int i = 0; i < (int)list.size(); i++) {
-                printf("  [%d] %s\r\n", i, list[i].ssid.c_str());
-            }
-        } else if (strcmp(args, "clear") == 0) {
-            ssid_manager.Clear();
-            printf("All networks cleared.\r\n");
-        } else {
-            // Expect "SSID PASSWORD"
-            char ssid[64] = {}, pass[64] = {};
-            if (sscanf(args, "%63s %63s", ssid, pass) == 2) {
-                ssid_manager.AddSsid(std::string(ssid), std::string(pass));
-                printf("Added: %s\r\n", ssid);
-            } else {
-                printf("Usage: !wifi SSID PASSWORD\r\n");
-            }
-        }
-        fflush(stdout);
-        return;
-    }
-    Application::GetInstance().SendTextChat(std::string(buf));
-}
-
-// Reads lines from USB serial (stdin) and dispatches them.
-// A line is terminated by '\n' or '\r'. Empty lines are ignored.
-static void SerialInputTask(void* arg) {
-    char buf[256];
-    int pos = 0;
-    while (true) {
-        int ch = fgetc(stdin);
-        if (ch == EOF) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-        if (ch == '\n' || ch == '\r') {
-            fputc('\n', stdout);
-            fflush(stdout);
-            if (pos > 0) {
-                buf[pos] = '\0';
-                HandleSerialLine(buf);
-                pos = 0;
-            }
-            continue;
-        }
-        if (pos < (int)(sizeof(buf) - 1)) {
-            buf[pos++] = (char)ch;
-            fputc(ch, stdout);
-            fflush(stdout);
-        }
-    }
-}
 
 class XiaoEsp32C3Board : public WifiBoard {
 private:
@@ -95,7 +28,7 @@ private:
     }
 
     void InitializeSerialInput() {
-        xTaskCreate(SerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
+        xTaskCreate(XiaoSerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
     }
 
     // Watches for Idle (Standby) state and reconnects automatically.
