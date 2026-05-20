@@ -114,6 +114,35 @@ Or in VS Code:
 - **Battery:** LiPo with charging circuit
 - **Buttons:** Wake word, Reset
 
+### Wiring — XIAO ESP32-C6
+
+**IMPORTANT: C6 GPIO numbers differ from C3 — do not copy C3 wiring.**
+
+| XIAO Pad | C3 GPIO | C6 GPIO | I2S Role       | INMP441 / MAX98357A |
+|----------|---------|---------|----------------|---------------------|
+| D0       | GPIO2   | GPIO0   | DOUT (speaker) | MAX98357A DIN       |
+| D1       | GPIO3   | GPIO1   | BCLK           | BCLK / SCK          |
+| D2       | GPIO4   | GPIO2   | WS / LRC       | WS / LRC            |
+| D3       | GPIO5   | GPIO21  | DIN (mic)      | INMP441 SD          |
+
+```
+XIAO C6 Pad       INMP441 (Mic)
+-----------       -------------
+D3 (GPIO21) ----> SD
+D2 (GPIO2)  ----> WS
+D1 (GPIO1)  ----> SCK
+3.3V        ----> VDD
+GND         ----> GND, L/R (tie L/R to GND for left-channel)
+
+XIAO C6 Pad       MAX98357A (Amp)
+-----------       ---------------
+D0 (GPIO0)  ----> DIN
+D1 (GPIO1)  ----> BCLK
+D2 (GPIO2)  ----> LRC
+5V          ----> VIN
+GND         ----> GND
+```
+
 ### Wiring Example (ESP32-S3):
 
 ```
