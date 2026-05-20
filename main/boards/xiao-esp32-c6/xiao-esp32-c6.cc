@@ -1,6 +1,7 @@
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
 #include "display/display.h"
+#include "led/gpio_led.h"
 #include "button.h"
 #include "config.h"
 #include "xiao_serial_commands.h"
@@ -74,6 +75,11 @@ public:
             AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
         return &audio_codec;
+    }
+
+    virtual Led* GetLed() override {
+        static GpioLed led(BUILTIN_LED_GPIO, 1);  // active-low on XIAO C6
+        return &led;
     }
 
     virtual Display* GetDisplay() override {
