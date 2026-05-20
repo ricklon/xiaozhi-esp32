@@ -7,7 +7,7 @@
                 "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/16m.csv\"",
                 "CONFIG_LANGUAGE_EN_US=y",
-                "CONFIG_OTA_URL=\"http://10.76.247.220:8003/xiaozhi/ota/\"",
+                "CONFIG_OTA_URL=\"http://192.168.1.39:8003/xiaozhi/ota/\"",
                 "CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING=y"
             ]
         }

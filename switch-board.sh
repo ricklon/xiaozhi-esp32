@@ -1,156 +1,222 @@
 #!/bin/bash
-# XiaoZhi ESP32 Board Switcher
+# switch-board.sh — per-board build management for xiaozhi-esp32
+#
+# Each board gets its own build directory (build-<board>/), preserving
+# compiled artifacts and sdkconfig so switching boards never throws away work.
+# Board-specific sdkconfig.defaults are merged automatically — no manual
+# sdkconfig patching required.
+#
+# Usage:
+#   ./switch-board.sh <board>                 setup if needed, then build
+#   ./switch-board.sh <board> setup           configure build dir from scratch
+#   ./switch-board.sh <board> build           build (setup if needed)
+#   ./switch-board.sh <board> flash [port]    build if needed, then flash
+#   ./switch-board.sh <board> clean           remove board's build dir
+#   ./switch-board.sh <board> status          show config and build state
+#   ./switch-board.sh list                    show all boards and build status
+#
+# Environment:
+#   PORT=<dev>   Serial port override (default: auto-detect /dev/ttyACM0)
+#
+# Examples:
+#   ./switch-board.sh xiao-esp32-c3 flash
+#   ./switch-board.sh xiao-esp32-c6 flash /dev/ttyACM1
+#   ./switch-board.sh lilygo-t-display-s3 build
+#   ./switch-board.sh list
 
-show_help() {
-    echo "XiaoZhi ESP32 Board Configuration Switcher"
-    echo ""
-    echo "Usage: $0 [s3|c3|status]"
-    echo ""
-    echo "Commands:"
-    echo "  s3      - Configure for ESP32-S3 (recommended, more RAM)"
-    echo "  c3      - Configure for ESP32-C3 (budget option)"
-    echo "  status  - Show current configuration"
-    echo ""
-    echo "Examples:"
-    echo "  $0 s3     # Switch to ESP32-S3"
-    echo "  $0 c3     # Switch to ESP32-C3"
+set -e
+
+BOARDS_DIR="main/boards"
+IDF_EXPORT="${IDF_PATH:-$HOME/esp/esp-idf}/export.sh"
+
+# Source ESP-IDF if idf.py not on PATH
+if ! command -v idf.py &>/dev/null; then
+    # shellcheck disable=SC1090
+    . "$IDF_EXPORT" > /dev/null 2>&1
+fi
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+die() { echo "Error: $*" >&2; exit 1; }
+
+auto_port() {
+    local p
+    for p in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyUSB0 /dev/ttyUSB1; do
+        [ -e "$p" ] && echo "$p" && return
+    done
+    echo "/dev/ttyACM0"
 }
 
-check_esp32_connected() {
-    if ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | grep -q ""; then
-        echo "✓ ESP32 detected!"
-        return 0
-    else
-        echo "✗ No ESP32 connected"
-        echo "  Connect your ESP32 and try again"
-        return 1
-    fi
+board_dir() { echo "$BOARDS_DIR/$1"; }
+
+build_dir() {
+    # Replace / with - for nested board paths (e.g. waveshare/foo -> waveshare-foo)
+    echo "build-$(echo "$1" | tr '/' '-')"
 }
 
-switch_to_s3() {
-    echo "Switching to ESP32-S3..."
-    echo ""
-    
-    # Activate ESP-IDF
-    . ~/esp/esp-idf/export.sh > /dev/null 2>&1
-    
-    # Clean previous build
-    if [ -d "build" ]; then
-        echo "Cleaning previous build..."
-        idf.py fullclean > /dev/null 2>&1
-    fi
-    
-    # Set target
-    echo "Setting target to ESP32-S3..."
-    idf.py set-target esp32s3
-    
-    if [ $? -eq 0 ]; then
-        echo ""
-        echo "✓ ESP32-S3 configuration complete!"
-        echo ""
-        echo "Next steps:"
-        echo "  1. Configure Wi-Fi: idf.py menuconfig"
-        echo "  2. Build: idf.py build"
-        echo "  3. Flash: idf.py flash"
-    else
-        echo "✗ Configuration failed"
-        exit 1
-    fi
+board_target() {
+    local cfg="$(board_dir "$1")/config.json"
+    [ -f "$cfg" ] || die "No config.json for board '$1'"
+    python3 -c "import json; print(json.load(open('$cfg'))['target'])"
 }
 
-switch_to_c3() {
-    echo "Switching to ESP32-C3..."
-    echo ""
-    
-    # Activate ESP-IDF
-    . ~/esp/esp-idf/export.sh > /dev/null 2>&1
-    
-    # Clean previous build
-    if [ -d "build" ]; then
-        echo "Cleaning previous build..."
-        idf.py fullclean > /dev/null 2>&1
-    fi
-    
-    # Set target
-    echo "Setting target to ESP32-C3..."
-    idf.py set-target esp32c3
-    
-    if [ $? -eq 0 ]; then
-        echo ""
-        echo "✓ ESP32-C3 configuration complete!"
-        echo ""
-        echo "Next steps:"
-        echo "  1. Configure Wi-Fi: idf.py menuconfig"
-        echo "  2. Build: idf.py build"
-        echo "  3. Flash: idf.py flash"
-    else
-        echo "✗ Configuration failed"
-        exit 1
-    fi
+# Build a merged sdkconfig.defaults for this board and write it to the build dir.
+# Merge order (later entries win):
+#   1. sdkconfig.defaults           (project-wide base)
+#   2. sdkconfig.defaults.<target>  (target-level tweaks, if present)
+#   3. main/boards/<board>/sdkconfig.defaults  (board authority)
+merge_defaults() {
+    local board="$1" target="$2" bdir="$3"
+    local merged="$bdir/.sdkconfig_defaults_merged"
+    mkdir -p "$bdir"
+    {
+        [ -f "sdkconfig.defaults" ]                        && cat "sdkconfig.defaults"
+        [ -f "sdkconfig.defaults.$target" ]                && cat "sdkconfig.defaults.$target"
+        [ -f "$(board_dir "$board")/sdkconfig.defaults" ]  && cat "$(board_dir "$board")/sdkconfig.defaults"
+    } > "$merged"
+    echo "$merged"
 }
 
-show_status() {
-    echo "Current XiaoZhi ESP32 Configuration"
-    echo "===================================="
-    echo ""
-    
-    # Check if in project directory
-    if [ ! -f "CMakeLists.txt" ] || [ ! -d "main" ]; then
-        echo "✗ Not in xiaozhi-esp32 project directory"
-        echo "  Run from: ~/esp-projects/xiaozhi-esp32"
-        exit 1
-    fi
-    
-    # Check build directory
-    if [ -d "build" ]; then
-        if [ -f "build/config/sdkconfig.h" ]; then
-            TARGET=$(grep "CONFIG_IDF_TARGET" build/config/sdkconfig.h 2>/dev/null | head -1 | cut -d'"' -f2)
-            if [ -n "$TARGET" ]; then
-                echo "✓ Current target: $TARGET"
-            else
-                echo "? Target not detected"
-            fi
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+cmd_list() {
+    echo "Available boards:"
+    # Find all config.json files, handle nested dirs
+    while IFS= read -r cfg; do
+        local b bdir target built
+        b="${cfg#$BOARDS_DIR/}"
+        b="${b%/config.json}"
+        bdir=$(build_dir "$b")
+        target=$(python3 -c "import json; print(json.load(open('$cfg')).get('target','?'))" 2>/dev/null)
+        if [ -f "$bdir/xiaozhi.bin" ]; then
+            built="[built]"
+        elif [ -d "$bdir" ]; then
+            built="[configured]"
         else
-            echo "? Build directory exists but no configuration"
+            built=""
         fi
+        printf "  %-42s %-12s %s\n" "$b" "($target)" "$built"
+    done < <(find "$BOARDS_DIR" -name "config.json" | sort)
+}
+
+cmd_status() {
+    local board="$1" port="$2"
+    local bdir target
+    bdir=$(build_dir "$board")
+    target=$(board_target "$board")
+
+    echo "Board:     $board"
+    echo "Target:    $target"
+    echo "Build dir: $bdir"
+    echo "Port:      $port"
+
+    if [ -f "$bdir/xiaozhi.bin" ]; then
+        local size
+        size=$(du -h "$bdir/xiaozhi.bin" | cut -f1)
+        echo "Status:    built ($size)"
+    elif [ -d "$bdir" ]; then
+        echo "Status:    configured (not built)"
     else
-        echo "✗ No build directory (project not configured)"
+        echo "Status:    not configured"
     fi
-    
-    echo ""
-    echo "ESP32 Connection:"
-    if ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | grep -q ""; then
-        ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | while read port; do
-            echo "  ✓ $port"
-        done
-    else
-        echo "  ✗ No ESP32 connected"
+
+    if [ -f "$bdir/sdkconfig" ]; then
+        echo ""
+        echo "Key settings:"
+        grep -E "^CONFIG_(IDF_TARGET|BOARD_TYPE_[A-Z0-9_]+=y|ESPTOOLPY_FLASHSIZE=\"|LANGUAGE_[A-Z_]+=y|OTA_URL=)" \
+            "$bdir/sdkconfig" 2>/dev/null | grep -v "is not set" | sed 's/^/  /'
     fi
 }
 
+cmd_setup() {
+    local board="$1"
+    local bdir target merged current_target
+
+    bdir=$(build_dir "$board")
+    target=$(board_target "$board")
+
+    echo "Setting up $board (target: $target, build dir: $bdir)"
+
+    # If build dir exists with a different target, wipe it
+    if [ -f "$bdir/CMakeCache.txt" ]; then
+        current_target=$(grep "^IDF_TARGET:STRING=" "$bdir/CMakeCache.txt" 2>/dev/null | cut -d= -f2 || true)
+        if [ -n "$current_target" ] && [ "$current_target" != "$target" ]; then
+            echo "Target changed ($current_target -> $target), cleaning $bdir..."
+            rm -rf "$bdir"
+        fi
+    fi
+
+    merged=$(merge_defaults "$board" "$target" "$bdir")
+    idf.py -B "$bdir" -DSDKCONFIG_DEFAULTS="$merged" set-target "$target"
+    echo "Done — $bdir is ready."
+}
+
+cmd_build() {
+    local board="$1"
+    local bdir
+    bdir=$(build_dir "$board")
+
+    if [ ! -f "$bdir/CMakeCache.txt" ]; then
+        cmd_setup "$board"
+    fi
+
+    echo "Building $board..."
+    idf.py -B "$bdir" build
+}
+
+cmd_flash() {
+    local board="$1" port="$2"
+    local bdir
+    bdir=$(build_dir "$board")
+
+    if [ ! -f "$bdir/xiaozhi.bin" ]; then
+        cmd_build "$board"
+    fi
+
+    echo "Flashing $board to $port..."
+    idf.py -B "$bdir" -p "$port" flash
+}
+
+cmd_clean() {
+    local board="$1"
+    local bdir
+    bdir=$(build_dir "$board")
+    echo "Removing $bdir"
+    rm -rf "$bdir"
+}
+
+# ---------------------------------------------------------------------------
 # Main
-if [ $# -eq 0 ]; then
-    show_help
+# ---------------------------------------------------------------------------
+
+board="$1"
+cmd="${2:-build}"
+port="${PORT:-$(auto_port)}"
+
+# Allow port as third arg: ./switch-board.sh <board> flash /dev/ttyACM1
+[ -n "$3" ] && port="$3"
+
+if [ -z "$board" ] || [ "$board" = "-h" ] || [ "$board" = "--help" ] || [ "$board" = "help" ]; then
+    head -20 "$0" | grep "^#" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 
-case "$1" in
-    s3)
-        switch_to_s3
-        ;;
-    c3)
-        switch_to_c3
-        ;;
-    status)
-        show_status
-        ;;
-    help|--help|-h)
-        show_help
-        ;;
-    *)
-        echo "Unknown command: $1"
-        echo ""
-        show_help
-        exit 1
-        ;;
+if [ "$board" = "list" ]; then
+    cmd_list
+    exit 0
+fi
+
+[ -d "$(board_dir "$board")" ] || die "Board '$board' not found. Run: ./switch-board.sh list"
+
+case "$cmd" in
+    setup)   cmd_setup  "$board" ;;
+    build)   cmd_build  "$board" ;;
+    flash)   cmd_flash  "$board" "$port" ;;
+    clean)   cmd_clean  "$board" ;;
+    status)  cmd_status "$board" "$port" ;;
+    *)       die "Unknown command '$cmd'. Use: setup build flash clean status list" ;;
 esac
