@@ -19,6 +19,13 @@
 #define AUDIO_I2S_SPK_GPIO_LRCK   GPIO_NUM_16
 #define AUDIO_I2S_SPK_GPIO_DOUT   GPIO_NUM_3
 
+// Known Wi-Fi networks — seeded into NVS at boot.
+// Add networks here or use !wifi SSID PASSWORD over serial.
+#define WIFI_NETWORKS { \
+    {"732-50-FUBAR", "aquaman13"}, \
+    {nullptr, nullptr} \
+}
+
 // Buttons
 #define BOOT_BUTTON_GPIO          GPIO_NUM_0
 

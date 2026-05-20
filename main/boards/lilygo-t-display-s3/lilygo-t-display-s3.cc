@@ -7,6 +7,7 @@
 #include "button.h"
 #include "config.h"
 #include "xiao_serial_commands.h"
+#include "ssid_manager.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -92,6 +93,16 @@ private:
 
 public:
     LilygoTDisplayS3Board() : boot_button_(BOOT_BUTTON_GPIO) {
+        struct { const char* ssid; const char* pass; } known[] = WIFI_NETWORKS;
+        auto& ssid_manager = SsidManager::GetInstance();
+        for (int i = 0; known[i].ssid != nullptr; i++) {
+            const auto& list = ssid_manager.GetSsidList();
+            bool found = false;
+            for (const auto& item : list) {
+                if (item.ssid == known[i].ssid) { found = true; break; }
+            }
+            if (!found) ssid_manager.AddSsid(known[i].ssid, known[i].pass);
+        }
         InitI80Display();
         InitializeButtons();
         InitializeSerialInput();
