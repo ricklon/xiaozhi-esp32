@@ -6,6 +6,7 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
+#include "xiao_serial_commands.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -71,6 +72,10 @@ private:
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
+    void InitializeSerialInput() {
+        xTaskCreate(XiaoSerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
+    }
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -89,6 +94,7 @@ public:
     LilygoTDisplayS3Board() : boot_button_(BOOT_BUTTON_GPIO) {
         InitI80Display();
         InitializeButtons();
+        InitializeSerialInput();
         GetBacklight()->RestoreBrightness();
     }
 
