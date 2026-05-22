@@ -69,8 +69,10 @@ board_target() {
 #   3. main/boards/<board>/sdkconfig.defaults  (board authority)
 merge_defaults() {
     local board="$1" target="$2" bdir="$3"
-    local merged="$bdir/.sdkconfig_defaults_merged"
-    mkdir -p "$bdir"
+    # Write to /tmp so we don't pre-create the build dir (idf.py refuses to
+    # run set-target if the dir exists but isn't a valid CMake tree).
+    local merged
+    merged=$(mktemp "/tmp/sdkconfig_defaults_${board//\//-}_XXXXXX")
     {
         [ -f "sdkconfig.defaults" ]                        && cat "sdkconfig.defaults"
         [ -f "sdkconfig.defaults.$target" ]                && cat "sdkconfig.defaults.$target"
@@ -151,7 +153,7 @@ cmd_setup() {
     fi
 
     merged=$(merge_defaults "$board" "$target" "$bdir")
-    idf.py -B "$bdir" -DSDKCONFIG_DEFAULTS="$merged" set-target "$target"
+    idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -DSDKCONFIG_DEFAULTS="$merged" set-target "$target"
     echo "Done — $bdir is ready."
 }
 
@@ -165,7 +167,7 @@ cmd_build() {
     fi
 
     echo "Building $board..."
-    idf.py -B "$bdir" build
+    idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" build
 }
 
 cmd_flash() {
@@ -178,7 +180,7 @@ cmd_flash() {
     fi
 
     echo "Flashing $board to $port..."
-    idf.py -B "$bdir" -p "$port" flash
+    idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -p "$port" flash
 }
 
 cmd_clean() {
