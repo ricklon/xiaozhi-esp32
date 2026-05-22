@@ -12,6 +12,11 @@
 #include "axp2101.h"
 #include "i2c_device.h"
 #include "xiao_serial_commands.h"
+#include "settings.h"
+#include "system_info.h"
+
+#include <wifi_manager.h>
+#include <esp_app_desc.h>
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -265,6 +270,19 @@ private:
                 return;
             }
             app.ToggleChatState();
+        });
+        boot_button_.OnLongPress([this]() {
+            auto& wifi = WifiManager::GetInstance();
+            Settings s("wifi", false);
+            std::string ota_url = s.GetString("ota_url");
+            if (ota_url.empty()) ota_url = CONFIG_OTA_URL;
+            char buf[128];
+            snprintf(buf, sizeof(buf), "v%s | %s | %s | %s",
+                esp_app_get_description()->version,
+                wifi.GetSsid().c_str(),
+                wifi.GetIpAddress().c_str(),
+                ota_url.c_str());
+            GetDisplay()->ShowNotification(buf, 5000);
         });
     }
 
