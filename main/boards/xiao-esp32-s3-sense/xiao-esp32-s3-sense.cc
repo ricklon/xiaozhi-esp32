@@ -1,6 +1,7 @@
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
 #include "display/display.h"
+#include "led/gpio_led.h"
 #include "button.h"
 #include "config.h"
 #include "esp32_camera.h"
@@ -54,10 +55,10 @@ private:
         config.xclk_freq_hz = XCLK_FREQ_HZ;
         config.ledc_timer   = LEDC_TIMER_0;
         config.ledc_channel = LEDC_CHANNEL_0;
-        config.pixel_format = PIXFORMAT_RGB565;
+        config.pixel_format = PIXFORMAT_JPEG;
         config.frame_size   = FRAMESIZE_QVGA;
         config.jpeg_quality = 12;
-        config.fb_count     = 2;
+        config.fb_count     = 1;
         config.fb_location  = CAMERA_FB_IN_PSRAM;
         config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
         config.sccb_i2c_port = 0;
@@ -109,6 +110,11 @@ public:
             AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
         return &audio_codec;
+    }
+
+    virtual Led* GetLed() override {
+        static GpioLed led(BUILTIN_LED_GPIO, 1);  // XIAO S3 user LED is active-low
+        return &led;
     }
 
     virtual Display* GetDisplay() override {
