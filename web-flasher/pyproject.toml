@@ -1,0 +1,12 @@
+[project]
+name = "xiaozhi-web-flasher"
+version = "1.0.0"
+description = "Web-based firmware flasher for XiaoZhi ESP32 devices"
+requires-python = ">=3.8"
+dependencies = []
+
+[dependency-groups]
+dev = []
+
+[tool.uv]
+package = false

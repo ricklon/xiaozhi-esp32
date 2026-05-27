@@ -56,6 +56,10 @@ build_dir() {
     echo "build-$(echo "$1" | tr '/' '-')"
 }
 
+defaults_stamp() {
+    echo "$(build_dir "$1")/.sdkconfig.defaults.merged"
+}
+
 board_target() {
     local cfg="$(board_dir "$1")/config.json"
     [ -f "$cfg" ] || die "No config.json for board '$1'"
@@ -136,9 +140,10 @@ cmd_status() {
 
 cmd_setup() {
     local board="$1"
-    local bdir target merged current_target
+    local bdir target merged current_target stamp
 
     bdir=$(build_dir "$board")
+    stamp=$(defaults_stamp "$board")
     target=$(board_target "$board")
 
     echo "Setting up $board (target: $target, build dir: $bdir)"
@@ -154,16 +159,26 @@ cmd_setup() {
 
     merged=$(merge_defaults "$board" "$target" "$bdir")
     idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -DSDKCONFIG_DEFAULTS="$merged" set-target "$target"
+    mkdir -p "$bdir"
+    cp "$merged" "$stamp"
     echo "Done — $bdir is ready."
 }
 
 cmd_build() {
     local board="$1"
-    local bdir
+    local bdir target merged stamp
     bdir=$(build_dir "$board")
+    stamp=$(defaults_stamp "$board")
+    target=$(board_target "$board")
 
     if [ ! -f "$bdir/CMakeCache.txt" ]; then
         cmd_setup "$board"
+    else
+        merged=$(merge_defaults "$board" "$target" "$bdir")
+        if [ ! -f "$stamp" ] || ! cmp -s "$merged" "$stamp"; then
+            echo "Board defaults changed for $board, re-running setup..."
+            cmd_setup "$board"
+        fi
     fi
 
     echo "Building $board..."

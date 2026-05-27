@@ -2,7 +2,10 @@ tmp/
 components/
 managed_components/
 build/
+build-*/
 dist/
+dist-test/
+site-test/
 .vscode/
 .devcontainer/
 sdkconfig.old

@@ -1,2 +1,5 @@
 firmware/**/*.bin
 vendor/*.js
+node_modules/
+.uv-cache/
+test-results/

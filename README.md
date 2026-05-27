@@ -1,16 +1,52 @@
-# An MCP-based Chatbot
+# XiaoZhi ESP32: English Developer Fork
 
 (English | [中文](README_zh.md) | [日本語](README_ja.md))
 
 ## Introduction
 
-👉 [Human: Give AI a camera vs AI: Instantly finds out the owner hasn't washed hair for three days【bilibili】](https://www.bilibili.com/video/BV1bpjgzKEhd/)
+This repository is an English-friendly ESP32 firmware fork focused on practical board bring-up, browser flashing, serial diagnostics, camera validation, and MCP-based device control.
 
-👉 [Handcraft your AI girlfriend, beginner's guide【bilibili】](https://www.bilibili.com/video/BV1XnmFYLEJN/)
-
-As a voice interaction entry, the XiaoZhi AI chatbot leverages the AI capabilities of large models like Qwen / DeepSeek, and achieves multi-terminal control via the MCP protocol.
+XiaoZhi ESP32 turns small ESP32 boards into voice AI devices. It streams audio to a backend for ASR, LLM, and TTS, and exposes device capabilities through MCP tools so the backend or companion apps can control hardware features such as audio, display, camera, diagnostics, firmware updates, and board-specific actions.
 
 <img src="docs/mcp-based-graph.jpg" alt="Control everything via MCP" width="320">
+
+## What's New In This Fork
+
+This fork adds a supported-board workflow for event demos, local testing, and English-speaking developers:
+
+- Browser-based web flasher for selected boards, with generated firmware manifests and GitHub Pages/release packaging support.
+- `uv`-managed web flasher serving for Python tooling, matching Astral `uv` conventions.
+- Web Serial console improvements that avoid toggling USB serial control signals, reducing unwanted ESP32 USB resets in Chrome.
+- Playwright regression coverage for the serial console connection flow.
+- Shared serial commands for supported boards: `!status`, `!server`, `!wifi`, `!camera`, `!reboot`, and `!help`.
+- Camera diagnostics for the XIAO ESP32-S3 Sense, including a one-command capture check.
+- MCP capability metadata and user-only diagnostic tools so companion software can discover board capabilities and run lightweight checks.
+- Supported firmware packaging for XIAO ESP32-C3, XIAO ESP32-C6, XIAO ESP32-S3 Sense, and Waveshare ESP32-S3 Touch AMOLED 1.8.
+
+## Supported Boards In This Fork
+
+The upstream project supports many boards. This fork currently focuses release and web-flasher automation on:
+
+| Board | Board ID | Notes |
+|------|----------|-------|
+| Seeed XIAO ESP32-C3 | `c3` | Budget I2S audio target; wake word disabled due resource limits. |
+| Seeed XIAO ESP32-C6 | `c6` | XIAO form factor with corrected I2S GPIO mapping. |
+| Seeed XIAO ESP32-S3 Sense | `s3` | OV2640 camera supported and verified with serial `!camera`. |
+| Waveshare ESP32-S3 Touch AMOLED 1.8 | `waveshare-s3-amoled18` | AMOLED, touch, audio, wake word, Wi-Fi, and MCP screen/audio tools. |
+
+Use the board switcher for local builds:
+
+```bash
+./switch-board.sh xiao-esp32-s3-sense build
+./switch-board.sh xiao-esp32-s3-sense flash /dev/ttyACM0
+```
+
+For Waveshare:
+
+```bash
+./switch-board.sh waveshare/esp32-s3-touch-amoled-1.8 build
+./switch-board.sh waveshare/esp32-s3-touch-amoled-1.8 flash /dev/ttyACM0
+```
 
 ## Version Notes
 
@@ -35,6 +71,9 @@ The stable version of v1 is 1.9.2. You can switch to v1 by running `git checkout
 - Device-side MCP for device control (Speaker, LED, Servo, GPIO, etc.)
 - Cloud-side MCP to extend large model capabilities (smart home control, PC desktop operation, knowledge search, email, etc.)
 - Customizable wake words, fonts, emojis, and chat backgrounds with online web-based editing ([Custom Assets Generator](https://github.com/78/xiaozhi-assets-generator))
+- Device capability reporting through MCP initialization metadata
+- User-only MCP diagnostics for system info, device status, speaker, display, and camera checks where supported
+- Browser web flasher and serial console for the supported board set in this fork
 
 ## Hardware
 
@@ -106,9 +145,32 @@ Breadboard demo:
 
 ### Firmware Flashing
 
-For beginners, it is recommended to use the firmware that can be flashed without setting up a development environment.
+For beginners, use the browser web flasher when prebuilt firmware is available. It avoids a local ESP-IDF setup and provides a Web Serial console for configuration and diagnostics.
 
-The firmware connects to the official [xiaozhi.me](https://xiaozhi.me) server by default. Personal users can register an account to use the Qwen real-time model for free.
+Local web flasher development:
+
+```bash
+cd web-flasher
+uv run python serve.py
+```
+
+Then open the local URL printed by the server in Chrome or another browser with Web Serial support.
+
+The serial console supports these commands:
+
+```text
+!status              show firmware, board, Wi-Fi, IP, OTA URL, heap, camera
+!server IP           set OTA/server URL to http://IP:8003/xiaozhi/ota/ and reboot
+!server URL          set a full OTA/server URL and reboot
+!wifi SSID PASSWORD  add a saved Wi-Fi network
+!wifi list           list saved Wi-Fi networks
+!wifi clear          remove saved Wi-Fi networks
+!camera              capture one camera frame when the board has a camera
+!reboot              reboot the device
+!help                show command help
+```
+
+The firmware connects to the official [xiaozhi.me](https://xiaozhi.me) server by default unless you configure a local/self-hosted server. Personal users can register an account to use the Qwen real-time model for free.
 
 👉 [Beginner's Firmware Flashing Guide](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
 
@@ -116,8 +178,27 @@ The firmware connects to the official [xiaozhi.me](https://xiaozhi.me) server by
 
 - Cursor or VSCode
 - Install ESP-IDF plugin, select SDK version 5.4 or above
+- ESP-IDF v5.5.x is used for current local validation
+- Python web tooling uses [`uv`](https://docs.astral.sh/uv/) from Astral
 - Linux is better than Windows for faster compilation and fewer driver issues
 - This project uses Google C++ code style, please ensure compliance when submitting code
+
+Common local commands:
+
+```bash
+# List supported release/web-flasher boards
+python3 scripts/supported_boards.py
+
+# Build a supported board with isolated per-board build output
+./switch-board.sh xiao-esp32-c3 build
+
+# Flash a board
+./switch-board.sh xiao-esp32-c3 flash /dev/ttyACM0
+
+# Run the web serial regression test
+cd web-flasher
+npm test
+```
 
 ### Developer Documentation
 
@@ -126,6 +207,24 @@ The firmware connects to the official [xiaozhi.me](https://xiaozhi.me) server by
 - [MCP Protocol Interaction Flow](docs/mcp-protocol.md) - Device-side MCP protocol implementation
 - [MQTT + UDP Hybrid Communication Protocol Document](docs/mqtt-udp.md)
 - [A detailed WebSocket communication protocol document](docs/websocket.md)
+- [Quick Start Guide](QUICKSTART.md) - Local setup notes for ESP32-S3/C3 development
+- [LLM Connection Guide](LLM_CONNECTION_GUIDE.md) - Official, self-hosted, and custom backend options
+
+## MCP And Diagnostics
+
+MCP messages are carried over the project WebSocket or MQTT transport as `type: "mcp"` messages with JSON-RPC 2.0 payloads. The device acts as an MCP server. The backend initializes the session, lists tools with `tools/list`, and invokes device functions with `tools/call`.
+
+This fork adds richer capability metadata to the MCP `initialize` response and exposes user-only diagnostic tools:
+
+- `self.get_system_info`
+- `self.diagnostics.get_checks`
+- `self.diagnostics.run_check`
+- `self.reboot`
+- `self.upgrade_firmware`
+- screen snapshot/preview tools on LVGL display boards
+- camera capture tools on camera boards
+
+Use regular tools for model-callable actions and user-only tools for companion-app or explicit user actions. See [docs/mcp-usage.md](docs/mcp-usage.md) and [docs/mcp-protocol.md](docs/mcp-protocol.md).
 
 ## Large Model Configuration
 

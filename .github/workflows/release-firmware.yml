@@ -1,0 +1,78 @@
+name: Release Supported Firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-matrix:
+    name: Prepare supported release matrix
+    runs-on: ubuntu-latest
+    outputs:
+      boards: ${{ steps.list.outputs.boards }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: list
+        name: List supported boards
+        run: |
+          echo "boards=$(python3 scripts/supported_boards.py --json)" >> "$GITHUB_OUTPUT"
+
+  build-supported:
+    name: Build ${{ matrix.full_name }}
+    needs: prepare-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare-matrix.outputs.boards) }}
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build board firmware
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          ./switch-board.sh "${{ matrix.board }}" build
+
+      - name: Package release payload
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          python3 scripts/build_supported_firmware.py --board "${{ matrix.board }}" --output-root dist
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release_${{ matrix.flasher_board_id }}
+          path: |
+            dist/release-zips/*.zip
+            dist/firmware/${{ matrix.flasher_board_id }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build-supported
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release_*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/release-zips/*.zip

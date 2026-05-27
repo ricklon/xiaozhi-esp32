@@ -20,4 +20,4 @@ echo "Press Ctrl-C to stop."
 echo ""
 
 cd "$SCRIPT_DIR"
-python3 -m http.server "$PORT"
+uv run python serve.py "$PORT"

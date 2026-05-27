@@ -4,6 +4,8 @@
 #include "display/display.h"
 #include "display/oled_display.h"
 #include "assets/lang_config.h"
+#include "audio/audio_codec.h"
+#include "sdkconfig.h"
 
 #include <esp_log.h>
 #include <esp_ota_ops.h>
@@ -170,9 +172,50 @@ std::string Board::GetSystemInfoJson() {
     }
     json += R"(},)";
 
-    json += R"("board":)" + GetBoardJson();
+    json += R"("board":)" + GetBoardJson() + R"(,)";
+    json += R"("mcp":)" + GetMcpCapabilitiesJson();
 
     // Close the JSON object
     json += R"(})";
+    return json;
+}
+
+std::string Board::GetMcpCapabilitiesJson() {
+    auto display = GetDisplay();
+    auto codec = GetAudioCodec();
+    auto camera = GetCamera();
+    auto led = GetLed();
+
+    const bool has_display = display != nullptr && dynamic_cast<NoDisplay*>(display) == nullptr;
+    const bool has_led = led != nullptr && dynamic_cast<NoLed*>(led) == nullptr;
+    const bool has_camera = camera != nullptr;
+    const bool has_audio_input = codec != nullptr && codec->input_sample_rate() > 0;
+    const bool has_audio_output = codec != nullptr && codec->output_sample_rate() > 0;
+    const bool has_backlight = GetBacklight() != nullptr;
+    const bool has_touch = HasTouchInput();
+    const bool has_battery = HasBatteryMonitor();
+    const bool web_flasher_supported = GetFirmwareBoardId() != nullptr && GetWebFlasherManifest() != nullptr;
+
+    auto app_desc = esp_app_get_description();
+    std::string json = R"({"board":{"type":")" + std::string(BOARD_TYPE) + R"(",)";
+    json += R"("name":")" + std::string(BOARD_NAME) + R"("},)";
+    json += R"("features":{)";
+    json += R"("audio_input":)" + std::string(has_audio_input ? "true" : "false") + R"(,)";
+    json += R"("audio_output":)" + std::string(has_audio_output ? "true" : "false") + R"(,)";
+    json += R"("display":)" + std::string(has_display ? "true" : "false") + R"(,)";
+    json += R"("backlight":)" + std::string(has_backlight ? "true" : "false") + R"(,)";
+    json += R"("camera":)" + std::string(has_camera ? "true" : "false") + R"(,)";
+    json += R"("touch":)" + std::string(has_touch ? "true" : "false") + R"(,)";
+    json += R"("battery":)" + std::string(has_battery ? "true" : "false") + R"(,)";
+    json += R"("status_led":)" + std::string(has_led ? "true" : "false") + R"()},)";
+    json += R"("firmware":{)";
+    json += R"("version":")" + std::string(app_desc->version) + R"(",)";
+    json += R"("default_ota_url":")" + std::string(CONFIG_OTA_URL) + R"(",)";
+    json += R"("web_flasher_supported":)" + std::string(web_flasher_supported ? "true" : "false");
+    if (web_flasher_supported) {
+        json += R"(,"board_id":")" + std::string(GetFirmwareBoardId()) + R"(",)";
+        json += R"("manifest":")" + std::string(GetWebFlasherManifest()) + R"(")";
+    }
+    json += R"(}})";
     return json;
 }

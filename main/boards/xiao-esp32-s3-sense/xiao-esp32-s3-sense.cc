@@ -125,6 +125,14 @@ public:
     virtual Camera* GetCamera() override {
         return camera_;
     }
+
+    virtual const char* GetFirmwareBoardId() const override {
+        return "s3";
+    }
+
+    virtual const char* GetWebFlasherManifest() const override {
+        return "manifest-s3.json";
+    }
 };
 
 DECLARE_BOARD(XiaoEsp32S3SenseBoard);

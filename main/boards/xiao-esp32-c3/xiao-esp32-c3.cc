@@ -82,6 +82,14 @@ public:
         static NoDisplay display;
         return &display;
     }
+
+    virtual const char* GetFirmwareBoardId() const override {
+        return "c3";
+    }
+
+    virtual const char* GetWebFlasherManifest() const override {
+        return "manifest-c3.json";
+    }
 };
 
 DECLARE_BOARD(XiaoEsp32C3Board);

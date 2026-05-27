@@ -79,9 +79,14 @@ public:
     virtual const char* GetNetworkStateIcon() = 0;
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);
     virtual std::string GetSystemInfoJson();
+    virtual std::string GetMcpCapabilitiesJson();
     virtual void SetPowerSaveLevel(PowerSaveLevel level) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+    virtual bool HasTouchInput() const { return false; }
+    virtual bool HasBatteryMonitor() const { return false; }
+    virtual const char* GetFirmwareBoardId() const { return nullptr; }
+    virtual const char* GetWebFlasherManifest() const { return nullptr; }
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

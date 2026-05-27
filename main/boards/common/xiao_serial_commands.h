@@ -1,10 +1,11 @@
 #pragma once
 
-// Shared serial command handler for all XIAO boards.
-// Handles: !wifi, !server, !status, !reboot, !help
+// Shared serial command handler for board builds that opt into the console.
+// Handles: !wifi, !server, !status, !camera, !reboot, !help
 // Anything else is forwarded to the chat pipeline.
 
 #include "application.h"
+#include "board.h"
 #include "settings.h"
 #include "ssid_manager.h"
 #include "system_info.h"
@@ -19,6 +20,20 @@
 #include <stdio.h>
 #include <string.h>
 
+static const char* GetXiaoSerialBoardName() {
+#if CONFIG_BOARD_TYPE_XIAO_ESP32C3
+    return "XIAO ESP32-C3";
+#elif CONFIG_BOARD_TYPE_XIAO_ESP32C6
+    return "XIAO ESP32-C6";
+#elif CONFIG_BOARD_TYPE_XIAO_ESP32S3_SENSE
+    return "XIAO ESP32-S3 Sense";
+#elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_AMOLED_1_8
+    return "Waveshare ESP32-S3 Touch AMOLED 1.8";
+#else
+    return "unknown";
+#endif
+}
+
 static void HandleXiaoSerialLine(const char* buf) {
     auto& ssid_manager = SsidManager::GetInstance();
 
@@ -27,23 +42,33 @@ static void HandleXiaoSerialLine(const char* buf) {
         const char* args = buf[5] == ' ' ? buf + 6 : "";
         if (strcmp(args, "list") == 0) {
             const auto& list = ssid_manager.GetSsidList();
-            printf("Saved networks (%d):\r\n", (int)list.size());
-            for (int i = 0; i < (int)list.size(); i++) {
-                printf("  [%d] %s\r\n", i, list[i].ssid.c_str());
+            printf("\r\n=== Saved WiFi Networks (%d) ===\r\n", (int)list.size());
+            if (list.empty()) {
+                printf("  (none)\r\n");
+            } else {
+                for (int i = 0; i < (int)list.size(); i++) {
+                    printf("  [%d] %s\r\n", i + 1, list[i].ssid.c_str());
+                }
             }
+            printf("================================\r\n\r\n");
         } else if (strcmp(args, "clear") == 0) {
             ssid_manager.Clear();
-            printf("All networks cleared.\r\n");
+            printf("\r\n=== WiFi Networks Cleared ===\r\n\r\n");
         } else if (strlen(args) > 0) {
             char ssid[64] = {}, pass[64] = {};
             if (sscanf(args, "%63s %63s", ssid, pass) == 2) {
                 ssid_manager.AddSsid(std::string(ssid), std::string(pass));
-                printf("Added: %s\r\n", ssid);
+                printf("\r\n=== WiFi Network Added ===\r\n");
+                printf("SSID: %s\r\n", ssid);
+                printf("==========================\r\n\r\n");
             } else {
-                printf("Usage: !wifi SSID PASSWORD\r\n");
+                printf("\r\nUsage: !wifi SSID PASSWORD\r\n\r\n");
             }
         } else {
-            printf("Usage: !wifi SSID PASSWORD | !wifi list | !wifi clear\r\n");
+            printf("\r\nWiFi Commands:\r\n");
+            printf("  !wifi SSID PASSWORD  - Add network\r\n");
+            printf("  !wifi list           - Show saved networks\r\n");
+            printf("  !wifi clear          - Remove all networks\r\n\r\n");
         }
         fflush(stdout);
         return;
@@ -65,9 +90,12 @@ static void HandleXiaoSerialLine(const char* buf) {
             }
             Settings s("wifi", true);
             s.SetString("ota_url", url);
-            printf("Server set to: %s\r\nRebooting...\r\n", url.c_str());
+            printf("\r\n=== Server Configured ===\r\n");
+            printf("URL: %s\r\n", url.c_str());
+            printf("========================\r\n");
+            printf("Rebooting in 1 second...\r\n\r\n");
             fflush(stdout);
-            vTaskDelay(pdMS_TO_TICKS(200));
+            vTaskDelay(pdMS_TO_TICKS(1000));
             esp_restart();
         }
         fflush(stdout);
@@ -80,21 +108,51 @@ static void HandleXiaoSerialLine(const char* buf) {
         Settings s("wifi", false);
         std::string ota_url = s.GetString("ota_url");
         if (ota_url.empty()) ota_url = std::string(CONFIG_OTA_URL) + " (default)";
-        printf("=== Status ===\r\n");
+        printf("\r\n========== DEVICE STATUS ==========\r\n");
         printf("Firmware : %s\r\n", esp_app_get_description()->version);
-        printf("SSID     : %s\r\n", wifi.GetSsid().c_str());
-        printf("IP       : %s\r\n", wifi.GetIpAddress().c_str());
+        printf("Board    : %s\r\n", GetXiaoSerialBoardName());
+        printf("-----------------------------------\r\n");
+        printf("WiFi SSID: %s\r\n", wifi.GetSsid().c_str());
+        printf("IP Address: %s\r\n", wifi.GetIpAddress().c_str());
+        printf("-----------------------------------\r\n");
         printf("OTA URL  : %s\r\n", ota_url.c_str());
+        printf("-----------------------------------\r\n");
         printf("Free heap: %lu bytes\r\n", (unsigned long)esp_get_free_heap_size());
+        printf("Camera   : %s\r\n", Board::GetInstance().GetCamera() ? "available" : "not available");
+        printf("===================================\r\n\r\n");
+        fflush(stdout);
+        return;
+    }
+
+    // --- !camera ---
+    if (strcmp(buf, "!camera") == 0) {
+        auto camera = Board::GetInstance().GetCamera();
+        if (camera == nullptr) {
+            printf("\r\n=== Camera Diagnostic ===\r\n");
+            printf("Camera: not available on this board\r\n");
+            printf("=========================\r\n\r\n");
+            fflush(stdout);
+            return;
+        }
+
+        printf("\r\n=== Camera Diagnostic ===\r\n");
+        printf("Capturing frame...\r\n");
+        fflush(stdout);
+        if (camera->Capture()) {
+            printf("Camera capture: OK\r\n");
+        } else {
+            printf("Camera capture: FAILED\r\n");
+        }
+        printf("=========================\r\n\r\n");
         fflush(stdout);
         return;
     }
 
     // --- !reboot ---
     if (strcmp(buf, "!reboot") == 0) {
-        printf("Rebooting...\r\n");
+        printf("\r\n>>> REBOOTING DEVICE NOW <<<\r\n\r\n");
         fflush(stdout);
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
         return;
     }
@@ -109,9 +167,10 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !server URL          -- set full OTA URL and reboot\r\n");
         printf("  !server              -- show current server URL\r\n");
         printf("  !status              -- show WiFi, IP, server, heap\r\n");
+        printf("  !camera              -- capture one camera frame\r\n");
         printf("  !reboot              -- reboot the device\r\n");
         printf("  !help                -- show this message\r\n");
-        printf("  anything else        -- send as chat message\r\n");
+        printf("  anything else        -- send as chat message\r\n\r\n");
         fflush(stdout);
         return;
     }
