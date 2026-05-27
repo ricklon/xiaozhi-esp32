@@ -441,6 +441,22 @@ public:
         return backlight_;
     }
 
+    virtual bool HasTouchInput() const override {
+        return true;
+    }
+
+    virtual bool HasBatteryMonitor() const override {
+        return true;
+    }
+
+    virtual const char* GetFirmwareBoardId() const override {
+        return "waveshare-s3-amoled18";
+    }
+
+    virtual const char* GetWebFlasherManifest() const override {
+        return "manifest-waveshare-s3-amoled18.json";
+    }
+
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
         static bool last_discharging = false;
         charging = pmic_->IsCharging();

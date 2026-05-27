@@ -86,6 +86,14 @@ public:
         static NoDisplay display;
         return &display;
     }
+
+    virtual const char* GetFirmwareBoardId() const override {
+        return "c6";
+    }
+
+    virtual const char* GetWebFlasherManifest() const override {
+        return "manifest-c6.json";
+    }
 };
 
 DECLARE_BOARD(XiaoEsp32C6Board);

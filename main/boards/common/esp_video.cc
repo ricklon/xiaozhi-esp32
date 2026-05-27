@@ -919,10 +919,10 @@ std::string EspVideo::Explain(const std::string& question) {
             [](void* arg, size_t index, const void* data, size_t len) -> size_t {
                 auto jpeg_queue = static_cast<QueueHandle_t>(arg);
                 JpegChunk chunk = {.data = nullptr, .len = len};
-                if (index == 0 && data != nullptr && len > 0) {
+                if (data != nullptr && len > 0) {
                     chunk.data = (uint8_t*)heap_caps_aligned_alloc(16, len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (chunk.data == nullptr) {
-                        ESP_LOGE(TAG, "Failed to allocate %zu bytes for JPEG chunk", len);
+                        ESP_LOGE(TAG, "Failed to allocate %zu bytes for JPEG chunk %zu", len, index);
                         chunk.len = 0;
                     } else {
                         memcpy(chunk.data, data, len);

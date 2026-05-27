@@ -11,6 +11,7 @@
 #include <esp_pthread.h>
 
 #include "application.h"
+#include "assets/lang_config.h"
 #include "display.h"
 #include "oled_display.h"
 #include "board.h"
@@ -133,6 +134,99 @@ void McpServer::AddUserOnlyTools() {
         [this](const PropertyList& properties) -> ReturnValue {
             auto& board = Board::GetInstance();
             return board.GetSystemInfoJson();
+        });
+
+    AddUserOnlyTool("self.diagnostics.get_checks",
+        "List the lightweight diagnostic checks supported by this device for MCP-exposed features.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+            auto& board = Board::GetInstance();
+            auto checks = cJSON_CreateArray();
+
+            auto add_check = [checks](const char* name, bool supported, const char* description) {
+                auto item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "name", name);
+                cJSON_AddBoolToObject(item, "supported", supported);
+                cJSON_AddStringToObject(item, "description", description);
+                cJSON_AddItemToArray(checks, item);
+            };
+
+            add_check("system_info", true, "Fetch firmware, board, and runtime information.");
+            add_check("device_status", true, "Fetch live device status such as network, battery, and screen state.");
+            add_check("speaker", board.GetAudioCodec() != nullptr && board.GetAudioCodec()->output_sample_rate() > 0,
+                "Play a short built-in sound through the speaker.");
+            add_check("display", board.GetDisplay() != nullptr && dynamic_cast<NoDisplay*>(board.GetDisplay()) == nullptr,
+                "Show a temporary notification on the device display.");
+            add_check("camera", board.GetCamera() != nullptr,
+                "Capture a frame from the onboard camera without running explanation.");
+
+            auto root = cJSON_CreateObject();
+            cJSON_AddItemToObject(root, "checks", checks);
+            return root;
+        });
+
+    AddUserOnlyTool("self.diagnostics.run_check",
+        "Run a lightweight diagnostic check for an MCP-relevant device feature.",
+        PropertyList({
+            Property("check", kPropertyTypeString)
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            auto& board = Board::GetInstance();
+            auto& app = Application::GetInstance();
+            auto check = properties["check"].value<std::string>();
+
+            auto result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "check", check.c_str());
+
+            if (check == "system_info") {
+                cJSON_AddBoolToObject(result, "ok", true);
+                cJSON_AddStringToObject(result, "message", "System info is available through self.get_system_info.");
+                return result;
+            }
+
+            if (check == "device_status") {
+                cJSON_AddBoolToObject(result, "ok", true);
+                cJSON_AddStringToObject(result, "message", "Device status is available through self.get_device_status.");
+                return result;
+            }
+
+            if (check == "speaker") {
+                auto codec = board.GetAudioCodec();
+                if (codec == nullptr || codec->output_sample_rate() <= 0) {
+                    throw std::runtime_error("Speaker diagnostic is not supported on this board");
+                }
+                app.PlaySound(Lang::Sounds::OGG_POPUP);
+                cJSON_AddBoolToObject(result, "ok", true);
+                cJSON_AddStringToObject(result, "message", "Played a short diagnostic sound.");
+                return result;
+            }
+
+            if (check == "display") {
+                auto display = board.GetDisplay();
+                if (display == nullptr || dynamic_cast<NoDisplay*>(display) != nullptr) {
+                    throw std::runtime_error("Display diagnostic is not supported on this board");
+                }
+                display->ShowNotification("MCP display diagnostic", 3000);
+                cJSON_AddBoolToObject(result, "ok", true);
+                cJSON_AddStringToObject(result, "message", "Displayed a diagnostic notification.");
+                return result;
+            }
+
+            if (check == "camera") {
+                auto camera = board.GetCamera();
+                if (camera == nullptr) {
+                    throw std::runtime_error("Camera diagnostic is not supported on this board");
+                }
+                TaskPriorityReset priority_reset(1);
+                if (!camera->Capture()) {
+                    throw std::runtime_error("Camera capture failed");
+                }
+                cJSON_AddBoolToObject(result, "ok", true);
+                cJSON_AddStringToObject(result, "message", "Camera capture succeeded.");
+                return result;
+            }
+
+            throw std::runtime_error("Unsupported diagnostic check: " + check);
         });
 
     AddUserOnlyTool("self.reboot", "Reboot the system",
@@ -389,7 +483,10 @@ void McpServer::ParseMessage(const cJSON* json) {
             }
         }
         auto app_desc = esp_app_get_description();
-        std::string message = "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"" BOARD_NAME "\",\"version\":\"";
+        auto& board = Board::GetInstance();
+        std::string message = "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{},\"xiaozhi\":";
+        message += board.GetMcpCapabilitiesJson();
+        message += "},\"serverInfo\":{\"name\":\"" BOARD_NAME "\",\"version\":\"";
         message += app_desc->version;
         message += "\"}}";
         ReplyResult(id_int, message);
