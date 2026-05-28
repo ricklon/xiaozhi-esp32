@@ -332,11 +332,11 @@ private:
 
     void ParseCapabilities(const cJSON* capabilities);
 
-    void ReplyResult(int id, const std::string& result);
-    void ReplyError(int id, const std::string& message);
+    void ReplyResult(const std::string& id_json, const std::string& result);
+    void ReplyError(const std::string& id_json, const std::string& message, int code = -32603);
 
-    void GetToolsList(int id, const std::string& cursor, bool list_user_only_tools);
-    void DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments);
+    void GetToolsList(const std::string& id_json, const std::string& cursor, bool list_user_only_tools);
+    void DoToolCall(const std::string& id_json, const std::string& tool_name, const cJSON* tool_arguments);
 
     std::vector<McpTool*> tools_;
 };

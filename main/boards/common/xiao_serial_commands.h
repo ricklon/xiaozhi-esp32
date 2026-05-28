@@ -19,6 +19,7 @@
 #include <freertos/task.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 static const char* GetXiaoSerialBoardName() {
 #if CONFIG_BOARD_TYPE_XIAO_ESP32C3
@@ -32,6 +33,37 @@ static const char* GetXiaoSerialBoardName() {
 #else
     return "unknown";
 #endif
+}
+
+static const char* TrimXiaoSerialLine(char* buf) {
+    char* start = buf;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+
+    char* end = start + strlen(start);
+    while (end > start && isspace((unsigned char)*(end - 1))) {
+        *(--end) = '\0';
+    }
+
+    const char* known_commands[] = {
+        "!reboot", "!status", "!camera", "!server", "!wifi", "!stop", "!help"
+    };
+    for (const char* command : known_commands) {
+        char* command_start = strstr(start, command);
+        if (command_start != nullptr) {
+            return command_start;
+        }
+    }
+
+    if (*start != '!') {
+        char* command_start = strchr(start, '!');
+        if (command_start != nullptr) {
+            return command_start;
+        }
+    }
+
+    return start;
 }
 
 static void HandleXiaoSerialLine(const char* buf) {
@@ -136,6 +168,15 @@ static void HandleXiaoSerialLine(const char* buf) {
         }
 
         printf("\r\n=== Camera Diagnostic ===\r\n");
+        auto& app = Application::GetInstance();
+        auto state = app.GetDeviceState();
+        if (state == kDeviceStateSpeaking) {
+            app.AbortSpeaking(kAbortReasonNone);
+        }
+        if (state == kDeviceStateListening || state == kDeviceStateSpeaking) {
+            app.StopListening();
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
         printf("Capturing frame...\r\n");
         fflush(stdout);
         if (camera->Capture()) {
@@ -157,6 +198,18 @@ static void HandleXiaoSerialLine(const char* buf) {
         return;
     }
 
+    // --- !stop ---
+    if (strcmp(buf, "!stop") == 0) {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateSpeaking) {
+            app.AbortSpeaking(kAbortReasonNone);
+        }
+        app.StopListening();
+        printf("\r\n>>> STOP LISTENING REQUESTED <<<\r\n\r\n");
+        fflush(stdout);
+        return;
+    }
+
     // --- !help ---
     if (strcmp(buf, "!help") == 0) {
         printf("Commands:\r\n");
@@ -169,8 +222,16 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !status              -- show WiFi, IP, server, heap\r\n");
         printf("  !camera              -- capture one camera frame\r\n");
         printf("  !reboot              -- reboot the device\r\n");
+        printf("  !stop                -- stop listening / close active listening\r\n");
         printf("  !help                -- show this message\r\n");
         printf("  anything else        -- send as chat message\r\n\r\n");
+        fflush(stdout);
+        return;
+    }
+
+    if (buf[0] == '!') {
+        printf("\r\nUnknown command: %s\r\n", buf);
+        printf("Type !help for available commands.\r\n\r\n");
         fflush(stdout);
         return;
     }
@@ -193,9 +254,15 @@ static void XiaoSerialInputTask(void* arg) {
             fflush(stdout);
             if (pos > 0) {
                 buf[pos] = '\0';
-                HandleXiaoSerialLine(buf);
+                const char* line = TrimXiaoSerialLine(buf);
+                if (*line != '\0') {
+                    HandleXiaoSerialLine(line);
+                }
                 pos = 0;
             }
+            continue;
+        }
+        if (ch == 0 || (ch < 0x20 && ch != '\t')) {
             continue;
         }
         if (pos < (int)(sizeof(buf) - 1)) {

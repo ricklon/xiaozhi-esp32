@@ -1,8 +1,10 @@
 {
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "uat:serial": "node tests/serial-uat.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0"
+    "@playwright/test": "^1.60.0",
+    "serialport": "^13.0.0"
   }
 }

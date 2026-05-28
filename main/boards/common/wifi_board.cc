@@ -10,6 +10,7 @@
 #include <freertos/task.h>
 #include <esp_network.h>
 #include <esp_log.h>
+#include <cJSON.h>
 #include <utility>
 
 #include <font_awesome.h>
@@ -22,6 +23,14 @@
 #endif
 
 static const char *TAG = "WifiBoard";
+
+static std::string PrintJsonAndDelete(cJSON* root) {
+    char* json_str = cJSON_PrintUnformatted(root);
+    std::string result(json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+    return result;
+}
 
 // Connection timeout in seconds
 static constexpr int CONNECT_TIMEOUT_SEC = 60;
@@ -267,19 +276,24 @@ const char* WifiBoard::GetNetworkStateIcon() {
 
 std::string WifiBoard::GetBoardJson() {
     auto& wifi = WifiManager::GetInstance();
-    std::string json = R"({"type":")" + std::string(BOARD_TYPE) + R"(",)";
-    json += R"("name":")" + std::string(BOARD_NAME) + R"(",)";
-    json += R"("mcp":)" + GetMcpCapabilitiesJson() + R"(,)";
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", BOARD_TYPE);
+    cJSON_AddStringToObject(root, "name", BOARD_NAME);
 
-    if (!wifi.IsConfigMode()) {
-        json += R"("ssid":")" + wifi.GetSsid() + R"(",)";
-        json += R"("rssi":)" + std::to_string(wifi.GetRssi()) + R"(,)";
-        json += R"("channel":)" + std::to_string(wifi.GetChannel()) + R"(,)";
-        json += R"("ip":")" + wifi.GetIpAddress() + R"(",)";
+    cJSON* mcp = cJSON_Parse(GetMcpCapabilitiesJson().c_str());
+    if (mcp != nullptr) {
+        cJSON_AddItemToObject(root, "mcp", mcp);
     }
 
-    json += R"("mac":")" + SystemInfo::GetMacAddress() + R"("})";
-    return json;
+    if (!wifi.IsConfigMode()) {
+        cJSON_AddStringToObject(root, "ssid", wifi.GetSsid().c_str());
+        cJSON_AddNumberToObject(root, "rssi", wifi.GetRssi());
+        cJSON_AddNumberToObject(root, "channel", wifi.GetChannel());
+        cJSON_AddStringToObject(root, "ip", wifi.GetIpAddress().c_str());
+    }
+
+    cJSON_AddStringToObject(root, "mac", SystemInfo::GetMacAddress().c_str());
+    return PrintJsonAndDelete(root);
 }
 
 void WifiBoard::SetPowerSaveLevel(PowerSaveLevel level) {

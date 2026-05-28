@@ -11,8 +11,17 @@
 #include <esp_ota_ops.h>
 #include <esp_chip_info.h>
 #include <esp_random.h>
+#include <cJSON.h>
 
 #define TAG "Board"
+
+static std::string PrintJsonAndDelete(cJSON* root) {
+    char* json_str = cJSON_PrintUnformatted(root);
+    std::string result(json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+    return result;
+}
 
 Board::Board() {
     Settings settings("board", true);
@@ -197,25 +206,34 @@ std::string Board::GetMcpCapabilitiesJson() {
     const bool web_flasher_supported = GetFirmwareBoardId() != nullptr && GetWebFlasherManifest() != nullptr;
 
     auto app_desc = esp_app_get_description();
-    std::string json = R"({"board":{"type":")" + std::string(BOARD_TYPE) + R"(",)";
-    json += R"("name":")" + std::string(BOARD_NAME) + R"("},)";
-    json += R"("features":{)";
-    json += R"("audio_input":)" + std::string(has_audio_input ? "true" : "false") + R"(,)";
-    json += R"("audio_output":)" + std::string(has_audio_output ? "true" : "false") + R"(,)";
-    json += R"("display":)" + std::string(has_display ? "true" : "false") + R"(,)";
-    json += R"("backlight":)" + std::string(has_backlight ? "true" : "false") + R"(,)";
-    json += R"("camera":)" + std::string(has_camera ? "true" : "false") + R"(,)";
-    json += R"("touch":)" + std::string(has_touch ? "true" : "false") + R"(,)";
-    json += R"("battery":)" + std::string(has_battery ? "true" : "false") + R"(,)";
-    json += R"("status_led":)" + std::string(has_led ? "true" : "false") + R"()},)";
-    json += R"("firmware":{)";
-    json += R"("version":")" + std::string(app_desc->version) + R"(",)";
-    json += R"("default_ota_url":")" + std::string(CONFIG_OTA_URL) + R"(",)";
-    json += R"("web_flasher_supported":)" + std::string(web_flasher_supported ? "true" : "false");
+
+    cJSON* root = cJSON_CreateObject();
+
+    cJSON* board = cJSON_CreateObject();
+    cJSON_AddStringToObject(board, "type", BOARD_TYPE);
+    cJSON_AddStringToObject(board, "name", BOARD_NAME);
+    cJSON_AddItemToObject(root, "board", board);
+
+    cJSON* features = cJSON_CreateObject();
+    cJSON_AddBoolToObject(features, "audio_input", has_audio_input);
+    cJSON_AddBoolToObject(features, "audio_output", has_audio_output);
+    cJSON_AddBoolToObject(features, "display", has_display);
+    cJSON_AddBoolToObject(features, "backlight", has_backlight);
+    cJSON_AddBoolToObject(features, "camera", has_camera);
+    cJSON_AddBoolToObject(features, "touch", has_touch);
+    cJSON_AddBoolToObject(features, "battery", has_battery);
+    cJSON_AddBoolToObject(features, "status_led", has_led);
+    cJSON_AddItemToObject(root, "features", features);
+
+    cJSON* firmware = cJSON_CreateObject();
+    cJSON_AddStringToObject(firmware, "version", app_desc->version);
+    cJSON_AddStringToObject(firmware, "default_ota_url", CONFIG_OTA_URL);
+    cJSON_AddBoolToObject(firmware, "web_flasher_supported", web_flasher_supported);
     if (web_flasher_supported) {
-        json += R"(,"board_id":")" + std::string(GetFirmwareBoardId()) + R"(",)";
-        json += R"("manifest":")" + std::string(GetWebFlasherManifest()) + R"(")";
+        cJSON_AddStringToObject(firmware, "board_id", GetFirmwareBoardId());
+        cJSON_AddStringToObject(firmware, "manifest", GetWebFlasherManifest());
     }
-    json += R"(}})";
-    return json;
+    cJSON_AddItemToObject(root, "firmware", firmware);
+
+    return PrintJsonAndDelete(root);
 }
