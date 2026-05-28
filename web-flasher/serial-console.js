@@ -8,6 +8,10 @@ class SerialConsole {
     this.disconnecting = false;
     this.manualDisconnect = false;
     this.savedPortInfo = null;
+    this.reconnecting = false;
+    this.reconnectTimer = null;
+    this.reconnectDeadline = 0;
+    this.reconnectAttempts = 0;
 
     this.connectBtn = document.getElementById("btn-connect");
     this.disconnectBtn = document.getElementById("btn-disconnect");
@@ -54,6 +58,12 @@ class SerialConsole {
       });
     }
 
+    navigator.serial.addEventListener("connect", (event) => {
+      if (this.reconnecting && event.target) {
+        this.tryReconnect(event.target);
+      }
+    });
+
     window.addEventListener("beforeunload", () => {
       if (this.port) {
         this.disconnect();
@@ -63,9 +73,13 @@ class SerialConsole {
     this.updateUI();
   }
 
-  async connect(port = null) {
+  async connect(port = null, options = {}) {
     if (this.port || this.disconnecting) {
       return;
+    }
+
+    if (!options.isReconnect) {
+      this.clearReconnect();
     }
 
     this.setStatus("connecting", "Opening...");
@@ -91,8 +105,9 @@ class SerialConsole {
         this.handleConnectionLost("Device disconnected");
       });
 
+      this.clearReconnect(false);
       this.setStatus("connected", "Connected");
-      this.print("[Connected]\n", "system");
+      this.print(options.isReconnect ? "[Reconnected]\n" : "[Connected]\n", "system");
       this.updateUI();
     } catch (error) {
       await this.closePort();
@@ -106,6 +121,7 @@ class SerialConsole {
     this.manualDisconnect = true;
     this.disconnecting = true;
     this.keepReading = false;
+    this.clearReconnect();
 
     if (this.reader) {
       await this.reader.cancel().catch(() => {});
@@ -149,14 +165,108 @@ class SerialConsole {
   }
 
   async handleConnectionLost(reason) {
-    if (this.manualDisconnect || this.disconnecting) {
+    if (this.manualDisconnect || this.disconnecting || this.reconnecting) {
       return;
     }
 
     this.print(`\n[${reason}]\n`, "system");
     await this.closePort();
-    this.markDisconnected("Disconnected");
-    this.print("[The board reset and Chrome dropped the USB serial port. Wait for boot to finish, then click Connect again.]\n", "system");
+    this.startReconnect();
+  }
+
+  startReconnect() {
+    if (!this.savedPortInfo) {
+      this.markDisconnected("Disconnected");
+      this.print("[The board reset and Chrome dropped the USB serial port. Click Connect again after it boots.]\n", "system");
+      return;
+    }
+
+    this.reconnecting = true;
+    this.reconnectAttempts = 0;
+    this.reconnectDeadline = Date.now() + 45000;
+    this.setStatus("connecting", "Reconnecting...");
+    this.updateUI();
+    this.print("[Waiting for the device to return...]\n", "system");
+    this.scheduleReconnect(250);
+  }
+
+  clearReconnect(updateStatus = true) {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnecting = false;
+    this.reconnectDeadline = 0;
+    this.reconnectAttempts = 0;
+    if (updateStatus && !this.port) {
+      this.setStatus("", "Disconnected");
+      this.updateUI();
+    }
+  }
+
+  scheduleReconnect(delayMs) {
+    if (!this.reconnecting || this.manualDisconnect) {
+      return;
+    }
+
+    if (Date.now() > this.reconnectDeadline) {
+      this.clearReconnect();
+      this.print("[Device did not return. Click Connect to select the serial port again.]\n", "system");
+      return;
+    }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.tryReconnect().catch((error) => {
+        console.debug("Reconnect attempt failed", error);
+        this.scheduleReconnect(Math.min(2000, 300 + this.reconnectAttempts * 250));
+      });
+    }, delayMs);
+  }
+
+  async tryReconnect(candidatePort = null) {
+    if (!this.reconnecting || this.port || this.disconnecting || this.manualDisconnect) {
+      return;
+    }
+
+    this.reconnectAttempts += 1;
+    const port = candidatePort || await this.findReconnectPort();
+    if (!port) {
+      this.scheduleReconnect(Math.min(2000, 300 + this.reconnectAttempts * 250));
+      return;
+    }
+
+    if (!this.matchesSavedPort(port)) {
+      this.scheduleReconnect(Math.min(2000, 300 + this.reconnectAttempts * 250));
+      return;
+    }
+
+    this.print("[Device returned, reopening serial port...]\n", "system");
+    await this.connect(port, { isReconnect: true });
+  }
+
+  async findReconnectPort() {
+    const ports = await navigator.serial.getPorts();
+    return ports.find((port) => this.matchesSavedPort(port)) || null;
+  }
+
+  matchesSavedPort(port) {
+    if (!this.savedPortInfo || !port?.getInfo) {
+      return false;
+    }
+
+    const info = port.getInfo();
+    if (this.savedPortInfo.usbVendorId && info.usbVendorId !== this.savedPortInfo.usbVendorId) {
+      return false;
+    }
+    if (this.savedPortInfo.usbProductId && info.usbProductId !== this.savedPortInfo.usbProductId) {
+      return false;
+    }
+    return true;
   }
 
   async readLoop() {
@@ -244,7 +354,7 @@ class SerialConsole {
 
   updateUI() {
     const connected = !!this.port;
-    const busy = this.statusDot.classList.contains("connecting") || this.disconnecting;
+    const busy = this.statusDot.classList.contains("connecting") || this.disconnecting || this.reconnecting;
 
     this.connectBtn.disabled = connected || busy;
     this.disconnectBtn.disabled = !connected || this.disconnecting;

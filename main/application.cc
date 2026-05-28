@@ -55,7 +55,11 @@ Application::~Application() {
 }
 
 bool Application::SetDeviceState(DeviceState state) {
-    return state_machine_.TransitionTo(state);
+    bool transitioned = state_machine_.TransitionTo(state);
+    if (transitioned) {
+        last_activity_time_ = esp_timer_get_time();
+    }
+    return transitioned;
 }
 
 void Application::Initialize() {
@@ -1067,6 +1071,13 @@ bool Application::CanEnterSleepMode() {
         return false;
     }
 
+    // State changes can happen between the sleep timer's one-second checks.
+    // Keep a short activity grace period so a just-finished conversation resets
+    // the idle counter before sleep/shutdown counting resumes.
+    if (last_activity_time_ != 0 && esp_timer_get_time() - last_activity_time_ < 2 * 1000 * 1000) {
+        return false;
+    }
+
     // Now it is safe to enter sleep mode
     return true;
 }
@@ -1148,4 +1159,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-
