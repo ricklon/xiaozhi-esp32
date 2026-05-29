@@ -17,7 +17,7 @@ jobs:
       boards: ${{ steps.list.outputs.boards }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - id: list
         name: List supported boards
@@ -36,7 +36,7 @@ jobs:
       image: espressif/idf:v5.5.2
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build board firmware
         shell: bash
@@ -51,7 +51,7 @@ jobs:
           python3 scripts/build_supported_firmware.py --board "${{ matrix.board }}" --output-root dist
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release_${{ matrix.flasher_board_id }}
           path: |
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release_*
           merge-multiple: true

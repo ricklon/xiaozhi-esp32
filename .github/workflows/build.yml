@@ -23,7 +23,7 @@ jobs:
       boards: ${{ steps.select.outputs.boards }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -51,7 +51,7 @@ jobs:
       image: espressif/idf:v5.5.2
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build board firmware
         shell: bash
@@ -66,7 +66,7 @@ jobs:
           python3 scripts/build_supported_firmware.py --board "${{ matrix.board }}" --output-root dist
 
       - name: Upload board artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware_${{ matrix.flasher_board_id }}
           path: |
@@ -86,10 +86,10 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download firmware artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: firmware_*
           merge-multiple: true
@@ -103,13 +103,13 @@ jobs:
             --output-root site
 
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
       - name: Deploy Pages
         id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
