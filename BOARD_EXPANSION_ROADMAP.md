@@ -48,17 +48,17 @@ Recommended boards to test next:
 
 ### Quick Test (Compilation Only)
 ```bash
-./test-board.sh <board-name>
+just test <board-name>
 ```
 
-This script will:
+This recipe (wrapping `test-board.sh`) will:
 1. Check if all required files exist
 2. Attempt to build the firmware
 3. Report success/failure
 4. Provide manual testing checklist
 
 ### Full Test (Hardware Required)
-1. Flash the board: `./switch-board.sh <board-name> flash`
+1. Flash the board: `just flash <board-name>`
 2. Connect serial monitor
 3. Follow the checklist in test-board.sh output
 4. Update BOARDS_STATUS.md with results
@@ -78,16 +78,16 @@ This script will:
 ## Resources
 
 - **Board Status**: `cat BOARDS_STATUS.md`
-- **Testing Script**: `./test-board.sh <board-name>`
+- **Testing**: `just test <board-name>`
 - **Board Template**: `cat BOARD_ADDITION_TEMPLATE.md`
-- **Switch Board**: `./switch-board.sh <board-name> <command>`
+- **Build/flash/monitor**: `just <recipe> <board-name>` (see `just --list`)
 
 ---
 
 ## Next Actions
 
 1. **Today**: Test one ESP32-S3 board similar to xiao-esp32-s3-sense
-   - Run: `./test-board.sh lilygo-t-display-s3`
+   - Run: `just test lilygo-t-display-s3`
    - If builds, flash and test hardware
 
 2. **This Week**: Test 3-5 boards from Phase 1 list

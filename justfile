@@ -6,6 +6,7 @@
 #   just                       # list recipes
 #   just list                  # list boards + build state
 #   just build xiao-esp32-c6
+#   just test xiao-esp32-c6                  # file checks + compile-only build
 #   just flash xiao-esp32-c6                 # auto-detect port
 #   just flash xiao-esp32-c6 /dev/ttyACM1    # explicit port
 #   just monitor                             # serial monitor on /dev/ttyACM0
@@ -33,6 +34,10 @@ setup board=board:
 # Build a board (runs setup automatically if needed).
 build board=board:
     ./switch-board.sh {{board}} build
+
+# Smoke-test a board: check required files, then compile-only build.
+test board=board:
+    ./test-board.sh {{board}}
 
 # Build if needed, then flash to the given port (auto-detected if omitted).
 flash board=board port=port:
