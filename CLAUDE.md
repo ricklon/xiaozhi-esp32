@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build System
 
-This project uses ESP-IDF v5.5.4 with `idf.py`. Each board gets its own build directory so artifacts are never shared or lost when switching boards.
+This project uses ESP-IDF v5.5.2 with `idf.py` (matches CI and release builds; minimum 5.4). Each board gets its own build directory so artifacts are never shared or lost when switching boards.
 
 ### switch-board.sh (preferred)
 

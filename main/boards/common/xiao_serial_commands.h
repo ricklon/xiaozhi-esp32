@@ -18,6 +18,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
@@ -210,6 +211,33 @@ static void HandleXiaoSerialLine(const char* buf) {
         return;
     }
 
+    // --- !mic ---
+    if (strncmp(buf, "!mic", 4) == 0 && (buf[4] == ' ' || buf[4] == '\0')) {
+        const char* args = buf[4] == ' ' ? buf + 5 : "";
+        auto& board = Board::GetInstance();
+        auto codec = board.GetAudioCodec();
+
+        if (strcmp(args, "mute") == 0) {
+            codec->EnableInput(false);
+            printf("Microphone muted.\r\n");
+        } else if (strcmp(args, "unmute") == 0) {
+            codec->EnableInput(true);
+            printf("Microphone unmuted.\r\n");
+        } else if (strncmp(args, "gain ", 5) == 0) {
+            float gain = atof(args + 5);
+            codec->SetInputGain(gain);
+            printf("Microphone gain set to %.1f\r\n", gain);
+        } else if (strcmp(args, "status") == 0 || strcmp(args, "") == 0) {
+            printf("Microphone status:\r\n");
+            printf("  Gain  : %.1f\r\n", codec->input_gain());
+            printf("  Muted : %s\r\n", codec->input_enabled() ? "no" : "yes");
+        } else {
+            printf("Usage: !mic [gain <value>|mute|unmute|status]\r\n");
+        }
+        fflush(stdout);
+        return;
+    }
+
     // --- !help ---
     if (strcmp(buf, "!help") == 0) {
         printf("Commands:\r\n");
@@ -221,6 +249,9 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !server              -- show current server URL\r\n");
         printf("  !status              -- show WiFi, IP, server, heap\r\n");
         printf("  !camera              -- capture one camera frame\r\n");
+        printf("  !mic [gain N]        -- set mic gain (float, e.g. 30.0)\r\n");
+        printf("  !mic [mute|unmute]   -- mute/unmute microphone\r\n");
+        printf("  !mic status          -- show mic gain and mute state\r\n");
         printf("  !reboot              -- reboot the device\r\n");
         printf("  !stop                -- stop listening / close active listening\r\n");
         printf("  !help                -- show this message\r\n");

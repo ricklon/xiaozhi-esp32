@@ -43,14 +43,14 @@ private:
             .cs_gpio_num = LCD_CS,
             .pclk_hz = 10 * 1000 * 1000,
             .trans_queue_depth = 10,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
             .dc_levels = {
                 .dc_idle_level = 0,
                 .dc_cmd_level = 0,
                 .dc_dummy_level = 0,
                 .dc_data_level = 1,
             },
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
         };
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i80(i80_bus, &io_config, &panel_io));
 
