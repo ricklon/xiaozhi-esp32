@@ -14,6 +14,7 @@ XiaoZhi ESP32 turns small ESP32 boards into voice AI devices. It streams audio t
 
 This fork adds a supported-board workflow for event demos, local testing, and English-speaking developers:
 
+- **MCP tools for microcontrollers** — a step-by-step guide to exposing board features (mute, standby, LEDs, sensors) to the assistant as callable MCP tools, with a complete end-to-end standby example. See [Building MCP Tools For A Board](#building-mcp-tools-for-a-board).
 - Browser-based web flasher for selected boards, with generated firmware manifests and GitHub Pages/release packaging support.
 - `uv`-managed web flasher serving for Python tooling, matching Astral `uv` conventions.
 - Web Serial console improvements that avoid toggling USB serial control signals, reducing unwanted ESP32 USB resets in Chrome.
@@ -225,6 +226,169 @@ This fork adds richer capability metadata to the MCP `initialize` response and e
 - camera capture tools on camera boards
 
 Use regular tools for model-callable actions and user-only tools for companion-app or explicit user actions. See [docs/mcp-usage.md](docs/mcp-usage.md) and [docs/mcp-protocol.md](docs/mcp-protocol.md).
+
+### Building MCP Tools For A Board
+
+An "MCP feature" is any board capability you expose to the assistant (or a companion app) as a callable function — set volume, toggle mute, set LED color, enter standby, read a sensor, and so on. This is **C++**, not a C library: the framework is a small set of header classes in [`main/mcp_server.h`](main/mcp_server.h) (`McpServer`, `McpTool`, `Property`, `PropertyList`). cJSON (a C library) is used internally only to serialize the JSON-RPC payloads — you never touch it for a normal tool.
+
+#### MCP tools vs. physical buttons
+
+These are different layers and are easy to confuse:
+
+- A **physical button** (standby, mute, boot) is wired in the board's `.cc` via the `Button` class and usually calls an `Application` API like `ToggleChatState()`. It only works when a human presses it.
+- An **MCP tool** exposes the *same capability* to the LLM and to companion apps over the network, so the model can act on it ("mute yourself", "go to standby").
+
+A good pattern for a feature like mute or standby is to write one handler method and wire **both** the button callback and the MCP tool to it.
+
+#### Identifying candidate features
+
+Anything stateful or controllable on the board is a candidate. The recurring shape is a **getter + setter** pair (read current state, change it) and persisting the setting with the `Settings` helper so it survives reboot. Existing in-tree examples to copy:
+
+| Feature | Where | Tool names |
+|---------|-------|-----------|
+| Press-to-talk vs click-to-talk mode | [`main/boards/common/press_to_talk_mcp_tool.cc`](main/boards/common/press_to_talk_mcp_tool.cc) | `self.set_press_to_talk` |
+| RGB LED strip | [`main/boards/df-k10/led_control.cc`](main/boards/df-k10/led_control.cc) | `self.led_strip.get_brightness`, `self.led_strip.set_brightness`, `self.led_strip.set_all_color`, … |
+| Volume / screen / camera | [`main/mcp_server.cc`](main/mcp_server.cc) `AddCommonTools()` | `self.audio_speaker.set_volume`, `self.screen.set_brightness`, `self.camera.take_photo` |
+
+#### Where tools are registered
+
+- **Common tools** shared by all boards (volume, brightness, theme, camera, device status) live in `McpServer::AddCommonTools()` in `main/mcp_server.cc`. Do **not** add board-specific tools here.
+- **Board-specific tools** go in an `InitializeTools()` method on your board class, called from the board constructor. `Application` later calls `AddCommonTools()` / `AddUserOnlyTools()` once during startup (see `main/application.cc`), prepending the common tools to your board's tools.
+
+#### Anatomy of a tool
+
+```cpp
+McpServer::GetInstance().AddTool(
+    "self.audio_speaker.set_mute",          // name: self.<domain>.<action>
+    "Mute or unmute the speaker.",          // description the model reads to decide when to call it
+    PropertyList({                          // input schema (empty PropertyList() = no args)
+        Property("mute", kPropertyTypeBoolean)
+    }),
+    [this](const PropertyList& properties) -> ReturnValue {   // callback
+        bool mute = properties["mute"].value<bool>();
+        Board::GetInstance().GetAudioCodec()->EnableOutput(!mute);
+        return true;                        // ReturnValue: bool | int | std::string | cJSON* | ImageContent*
+    });
+```
+
+Property types and rules (from `mcp_server.h`):
+
+- `kPropertyTypeBoolean`, `kPropertyTypeInteger`, `kPropertyTypeString`.
+- A property **with no default is required**; one constructed with a default value is optional.
+- Integers can take a range: `Property("level", kPropertyTypeInteger, 0, 8)` (min/max) or `Property("level", kPropertyTypeInteger, 4, 0, 8)` (default, min, max). Out-of-range values throw and are reported as an MCP error.
+- Read args inside the callback with `properties["name"].value<T>()`.
+
+#### Regular vs. user-only tools
+
+- `AddTool(...)` — visible to the LLM; use for anything the assistant should be able to do on its own.
+- `AddUserOnlyTool(...)` — annotated `audience: ["user"]`, hidden from the model and only callable by a companion app / explicit user action. Use for sensitive operations like `self.reboot`, `self.upgrade_firmware`, and diagnostics.
+
+#### Worked example: a "standby" feature, end to end
+
+This project already has a first-class idle/sleep mechanism — `PowerSaveTimer` ([`main/boards/common/power_save_timer.h`](main/boards/common/power_save_timer.h)). The example below wires standby up three ways — a physical button, an MCP tool, and an automatic idle timeout — all sharing **one** handler, so the LLM, a companion app, and a human all trigger identical behavior.
+
+```cpp
+#include "wifi_board.h"
+#include "audio/audio_codec.h"
+#include "boards/common/button.h"
+#include "boards/common/power_save_timer.h"
+#include "mcp_server.h"
+#include "config.h"
+#include <esp_log.h>
+
+#define TAG "MyBoard"
+
+class MyBoard : public WifiBoard {
+private:
+    Button standby_button_{STANDBY_BUTTON_GPIO};   // from your board's config.h
+    PowerSaveTimer* power_save_timer_ = nullptr;
+    bool in_standby_ = false;
+
+    // ---- one handler, shared by button + MCP tool + idle timer ----
+    void EnterStandby() {
+        if (in_standby_) return;
+        in_standby_ = true;
+        ESP_LOGI(TAG, "Entering standby");
+        GetAudioCodec()->EnableOutput(false);          // silence speaker
+        if (auto* bl = GetBacklight()) {
+            bl->SetBrightness(0, true);                 // screen off
+        }
+    }
+
+    void ExitStandby() {
+        if (!in_standby_) return;
+        in_standby_ = false;
+        ESP_LOGI(TAG, "Leaving standby");
+        GetAudioCodec()->EnableOutput(true);
+        if (auto* bl = GetBacklight()) {
+            bl->RestoreBrightness();                    // back to user's level
+        }
+    }
+
+    // ---- 1. automatic standby after idle ----
+    void InitializePowerSaveTimer() {
+        // cpu_max_freq, seconds_to_sleep, seconds_to_shutdown(-1 = never)
+        power_save_timer_ = new PowerSaveTimer(-1, 60);
+        power_save_timer_->OnEnterSleepMode([this]() { EnterStandby(); });
+        power_save_timer_->OnExitSleepMode([this]() { ExitStandby(); });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    // ---- 2. physical button: long-press to standby, click wakes ----
+    void InitializeButtons() {
+        standby_button_.OnLongPress([this]() { EnterStandby(); });
+        standby_button_.OnClick([this]() {
+            power_save_timer_->WakeUp();   // resets idle timer + fires OnExitSleepMode
+        });
+    }
+
+    // ---- 3. MCP tools: let the assistant / companion app do it ----
+    void InitializeTools() {
+        auto& mcp = McpServer::GetInstance();
+
+        mcp.AddTool("self.system.enter_standby",
+            "Put the device into low-power standby. The screen and speaker turn off. "
+            "The device wakes on a button press.",
+            PropertyList(),                            // no arguments
+            [this](const PropertyList&) -> ReturnValue {
+                EnterStandby();
+                return true;
+            });
+
+        // A getter so the model can answer "are you in standby?"
+        mcp.AddTool("self.system.get_standby",
+            "Returns true if the device is currently in standby.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                return in_standby_;                    // ReturnValue accepts bool
+            });
+    }
+
+public:
+    MyBoard() {
+        InitializePowerSaveTimer();
+        InitializeButtons();
+        InitializeTools();      // tools must be registered during construction
+    }
+
+    virtual AudioCodec* GetAudioCodec() override { /* ...your codec... */ }
+    virtual Display* GetDisplay() override { /* ...your display... */ }
+};
+
+DECLARE_BOARD(MyBoard);
+```
+
+How the pieces connect:
+
+- **`PowerSaveTimer(cpu_max_freq, seconds_to_sleep, seconds_to_shutdown)`** fires `OnEnterSleepMode` after `seconds_to_sleep` of no activity and `OnExitSleepMode` when woken. `WakeUp()` resets the countdown and exits sleep — call it on any user activity. The optional `seconds_to_shutdown` drives `OnShutdownRequest` for a full power-off path (left at `-1`/never here).
+- **The button and the tool both call the same `EnterStandby()`** — the key pattern. The button works offline; the MCP tool lets the LLM ("go to standby") or a companion app trigger identical behavior over the network.
+- **`EnableOutput(false)` + `SetBrightness(0)`** are the real, in-tree way boards quiet the speaker and screen. For true deep sleep, `esp-spot` ([`main/boards/esp-spot/esp_spot_board.cc`](main/boards/esp-spot/esp_spot_board.cc)) goes all the way to `esp_deep_sleep` with a GPIO/IMU wake source in its `EnterDeepSleep()` — follow that model if "screen + audio off" isn't enough.
+
+Adapt `STANDBY_BUTTON_GPIO` to a pin in your board's `config.h`, and the `GetAudioCodec()`/`GetDisplay()`/`GetBacklight()` overrides to your hardware.
+
+#### Testing
+
+Build and flash your board, then drive the device over its WebSocket/MQTT transport from the backend — the server sends `tools/list` (your tool should appear) and `tools/call`. The JSON-RPC framing and the exact `initialize` / `tools/list` / `tools/call` flow are documented in [docs/mcp-protocol.md](docs/mcp-protocol.md). For camera tools specifically there is a local harness at `scripts/local_camera_mcp_harness.py`.
 
 ## Large Model Configuration
 

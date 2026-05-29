@@ -127,6 +127,185 @@ v1 的稳定版本为 1.9.2，可以通过 `git checkout v1` 来切换到 v1 版
 - [MQTT + UDP 混合通信协议文档](docs/mqtt-udp_zh.md)
 - [一份详细的 WebSocket 通信协议文档](docs/websocket_zh.md)
 
+## MCP 与诊断
+
+MCP 消息通过项目的 WebSocket 或 MQTT 传输层以 `type: "mcp"` 消息承载，使用 JSON-RPC 2.0 负载。设备充当 MCP 服务器。后端初始化会话，使用 `tools/list` 列出工具，并通过 `tools/call` 调用设备功能。
+
+本分支为 MCP `initialize` 响应增加了更丰富的能力元数据，并暴露了仅供用户使用（user-only）的诊断工具：
+
+- `self.get_system_info`
+- `self.diagnostics.get_checks`
+- `self.diagnostics.run_check`
+- `self.reboot`
+- `self.upgrade_firmware`
+- LVGL 显示开发板上的屏幕截图/预览工具
+- 摄像头开发板上的拍照工具
+
+对模型可调用的动作使用普通工具，对配套 App 或显式用户操作使用 user-only 工具。参见 [docs/mcp-usage_zh.md](docs/mcp-usage_zh.md) 和 [docs/mcp-protocol_zh.md](docs/mcp-protocol_zh.md)。
+
+### 为开发板构建 MCP 工具
+
+“MCP 功能”是指你以可调用函数的形式暴露给助手（或配套 App）的任意开发板能力——设置音量、切换静音、设置 LED 颜色、进入待机、读取传感器等等。这是 **C++**，而不是 C 库：该框架是 [`main/mcp_server.h`](main/mcp_server.h) 中的一小组头文件类（`McpServer`、`McpTool`、`Property`、`PropertyList`）。cJSON（一个 C 库）仅在内部用于序列化 JSON-RPC 负载——普通工具开发中你完全不需要接触它。
+
+#### MCP 工具 vs. 物理按键
+
+这是两个不同的层级，容易混淆：
+
+- **物理按键**（待机、静音、boot）通过 `Button` 类在开发板的 `.cc` 中接线，通常调用 `ToggleChatState()` 之类的 `Application` API。它只有在人按下时才起作用。
+- **MCP 工具**把*同一能力*通过网络暴露给 LLM 和配套 App，因此模型可以执行它（“静音”、“进入待机”）。
+
+对于静音或待机这类功能，一个好的模式是编写一个处理方法，并把按键回调和 MCP 工具**都**接到它上面。
+
+#### 识别候选功能
+
+开发板上任何有状态或可控制的东西都是候选。常见形态是一对 **getter + setter**（读取当前状态、修改它），并用 `Settings` 辅助类持久化设置，使其在重启后保留。可参考的现有树内示例：
+
+| 功能 | 位置 | 工具名 |
+|------|------|--------|
+| 长按说话 vs 单击说话模式 | [`main/boards/common/press_to_talk_mcp_tool.cc`](main/boards/common/press_to_talk_mcp_tool.cc) | `self.set_press_to_talk` |
+| RGB LED 灯带 | [`main/boards/df-k10/led_control.cc`](main/boards/df-k10/led_control.cc) | `self.led_strip.get_brightness`、`self.led_strip.set_brightness`、`self.led_strip.set_all_color` 等 |
+| 音量 / 屏幕 / 摄像头 | [`main/mcp_server.cc`](main/mcp_server.cc) 的 `AddCommonTools()` | `self.audio_speaker.set_volume`、`self.screen.set_brightness`、`self.camera.take_photo` |
+
+#### 工具在哪里注册
+
+- 所有开发板共享的**通用工具**（音量、亮度、主题、摄像头、设备状态）位于 `main/mcp_server.cc` 的 `McpServer::AddCommonTools()` 中。**不要**在这里添加开发板专属工具。
+- **开发板专属工具**放在你的开发板类的 `InitializeTools()` 方法中，并从开发板构造函数调用。`Application` 随后在启动时调用一次 `AddCommonTools()` / `AddUserOnlyTools()`（见 `main/application.cc`），把通用工具插到你的开发板工具前面。
+
+#### 工具的结构
+
+```cpp
+McpServer::GetInstance().AddTool(
+    "self.audio_speaker.set_mute",          // 名称：self.<域>.<动作>
+    "Mute or unmute the speaker.",          // 描述，模型据此决定何时调用
+    PropertyList({                          // 输入 schema（空的 PropertyList() = 无参数）
+        Property("mute", kPropertyTypeBoolean)
+    }),
+    [this](const PropertyList& properties) -> ReturnValue {   // 回调
+        bool mute = properties["mute"].value<bool>();
+        Board::GetInstance().GetAudioCodec()->EnableOutput(!mute);
+        return true;                        // ReturnValue: bool | int | std::string | cJSON* | ImageContent*
+    });
+```
+
+属性类型与规则（来自 `mcp_server.h`）：
+
+- `kPropertyTypeBoolean`、`kPropertyTypeInteger`、`kPropertyTypeString`。
+- **没有默认值的属性是必填的**；用默认值构造的属性是可选的。
+- 整数可以带范围：`Property("level", kPropertyTypeInteger, 0, 8)`（最小/最大）或 `Property("level", kPropertyTypeInteger, 4, 0, 8)`（默认、最小、最大）。超出范围的值会抛出异常并作为 MCP 错误返回。
+- 在回调内用 `properties["name"].value<T>()` 读取参数。
+
+#### 普通工具 vs. user-only 工具
+
+- `AddTool(...)`——对 LLM 可见；用于助手可以自行完成的任何操作。
+- `AddUserOnlyTool(...)`——标注 `audience: ["user"]`，对模型隐藏，仅可由配套 App / 显式用户操作调用。用于 `self.reboot`、`self.upgrade_firmware` 和诊断等敏感操作。
+
+#### 完整示例：端到端的“待机”功能
+
+本项目已经内置了一流的空闲/休眠机制——`PowerSaveTimer`（[`main/boards/common/power_save_timer.h`](main/boards/common/power_save_timer.h)）。下面的示例用三种方式接入待机——物理按键、MCP 工具和自动空闲超时——它们都共享**同一个**处理方法，因此 LLM、配套 App 和人都能触发完全相同的行为。
+
+```cpp
+#include "wifi_board.h"
+#include "audio/audio_codec.h"
+#include "boards/common/button.h"
+#include "boards/common/power_save_timer.h"
+#include "mcp_server.h"
+#include "config.h"
+#include <esp_log.h>
+
+#define TAG "MyBoard"
+
+class MyBoard : public WifiBoard {
+private:
+    Button standby_button_{STANDBY_BUTTON_GPIO};   // 来自你的开发板 config.h
+    PowerSaveTimer* power_save_timer_ = nullptr;
+    bool in_standby_ = false;
+
+    // ---- 同一个处理方法，由按键 + MCP 工具 + 空闲定时器共享 ----
+    void EnterStandby() {
+        if (in_standby_) return;
+        in_standby_ = true;
+        ESP_LOGI(TAG, "Entering standby");
+        GetAudioCodec()->EnableOutput(false);          // 关闭扬声器
+        if (auto* bl = GetBacklight()) {
+            bl->SetBrightness(0, true);                 // 关屏
+        }
+    }
+
+    void ExitStandby() {
+        if (!in_standby_) return;
+        in_standby_ = false;
+        ESP_LOGI(TAG, "Leaving standby");
+        GetAudioCodec()->EnableOutput(true);
+        if (auto* bl = GetBacklight()) {
+            bl->RestoreBrightness();                    // 恢复到用户的亮度
+        }
+    }
+
+    // ---- 1. 空闲后自动待机 ----
+    void InitializePowerSaveTimer() {
+        // cpu_max_freq, seconds_to_sleep, seconds_to_shutdown(-1 = 永不)
+        power_save_timer_ = new PowerSaveTimer(-1, 60);
+        power_save_timer_->OnEnterSleepMode([this]() { EnterStandby(); });
+        power_save_timer_->OnExitSleepMode([this]() { ExitStandby(); });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    // ---- 2. 物理按键：长按进入待机，单击唤醒 ----
+    void InitializeButtons() {
+        standby_button_.OnLongPress([this]() { EnterStandby(); });
+        standby_button_.OnClick([this]() {
+            power_save_timer_->WakeUp();   // 重置空闲定时器并触发 OnExitSleepMode
+        });
+    }
+
+    // ---- 3. MCP 工具：让助手 / 配套 App 来执行 ----
+    void InitializeTools() {
+        auto& mcp = McpServer::GetInstance();
+
+        mcp.AddTool("self.system.enter_standby",
+            "Put the device into low-power standby. The screen and speaker turn off. "
+            "The device wakes on a button press.",
+            PropertyList(),                            // 无参数
+            [this](const PropertyList&) -> ReturnValue {
+                EnterStandby();
+                return true;
+            });
+
+        // 一个 getter，让模型能回答“你处于待机吗？”
+        mcp.AddTool("self.system.get_standby",
+            "Returns true if the device is currently in standby.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                return in_standby_;                    // ReturnValue 接受 bool
+            });
+    }
+
+public:
+    MyBoard() {
+        InitializePowerSaveTimer();
+        InitializeButtons();
+        InitializeTools();      // 工具必须在构造期间注册
+    }
+
+    virtual AudioCodec* GetAudioCodec() override { /* ...你的 codec... */ }
+    virtual Display* GetDisplay() override { /* ...你的 display... */ }
+};
+
+DECLARE_BOARD(MyBoard);
+```
+
+各部分如何衔接：
+
+- **`PowerSaveTimer(cpu_max_freq, seconds_to_sleep, seconds_to_shutdown)`** 在 `seconds_to_sleep` 秒无活动后触发 `OnEnterSleepMode`，被唤醒时触发 `OnExitSleepMode`。`WakeUp()` 重置倒计时并退出休眠——在任何用户活动时调用它。可选的 `seconds_to_shutdown` 驱动 `OnShutdownRequest`，用于完全关机路径（此处设为 `-1`/永不）。
+- **按键和工具都调用同一个 `EnterStandby()`**——这是关键模式。按键离线可用；MCP 工具让 LLM（“进入待机”）或配套 App 通过网络触发相同行为。
+- **`EnableOutput(false)` + `SetBrightness(0)`** 是开发板让扬声器和屏幕静默的真实、树内做法。如需真正的深度休眠，`esp-spot`（[`main/boards/esp-spot/esp_spot_board.cc`](main/boards/esp-spot/esp_spot_board.cc)）在其 `EnterDeepSleep()` 中一路调用到带 GPIO/IMU 唤醒源的 `esp_deep_sleep`——如果“关屏 + 关音频”还不够，可参照该模式。
+
+把 `STANDBY_BUTTON_GPIO` 改成你的开发板 `config.h` 中的引脚，并把 `GetAudioCodec()`/`GetDisplay()`/`GetBacklight()` 重写改成你的硬件。
+
+#### 测试
+
+构建并烧录你的开发板，然后从后端通过其 WebSocket/MQTT 传输驱动设备——服务器发送 `tools/list`（你的工具应当出现）和 `tools/call`。JSON-RPC 帧格式以及准确的 `initialize` / `tools/list` / `tools/call` 流程记录在 [docs/mcp-protocol_zh.md](docs/mcp-protocol_zh.md) 中。摄像头工具另有一个本地工具 `scripts/local_camera_mcp_harness.py`。
+
 ## 大模型配置
 
 如果你已经拥有一个小智 AI 聊天机器人设备，并且已接入官方服务器，可以登录 [xiaozhi.me](https://xiaozhi.me) 控制台进行配置。

@@ -127,6 +127,185 @@ Feishuドキュメントチュートリアルをご覧ください：
 - [MQTT + UDP ハイブリッド通信プロトコルドキュメント](docs/mqtt-udp.md)
 - [詳細なWebSocket通信プロトコルドキュメント](docs/websocket.md)
 
+## MCP と診断
+
+MCP メッセージは、プロジェクトの WebSocket または MQTT トランスポート上を `type: "mcp"` メッセージとして、JSON-RPC 2.0 ペイロードで運ばれます。デバイスは MCP サーバーとして動作します。バックエンドはセッションを初期化し、`tools/list` でツールを列挙し、`tools/call` でデバイス機能を呼び出します。
+
+本フォークは MCP `initialize` レスポンスにより豊富な機能メタデータを追加し、ユーザー専用（user-only）の診断ツールを公開します：
+
+- `self.get_system_info`
+- `self.diagnostics.get_checks`
+- `self.diagnostics.run_check`
+- `self.reboot`
+- `self.upgrade_firmware`
+- LVGL ディスプレイボードのスクリーンショット／プレビューツール
+- カメラボードの撮影ツール
+
+モデルが呼び出せる操作には通常ツールを、コンパニオンアプリや明示的なユーザー操作には user-only ツールを使います。[docs/mcp-usage.md](docs/mcp-usage.md) と [docs/mcp-protocol.md](docs/mcp-protocol.md) を参照してください。
+
+### ボード向け MCP ツールの作り方
+
+「MCP 機能」とは、アシスタント（またはコンパニオンアプリ）に呼び出し可能な関数として公開する任意のボード機能のことです——音量設定、ミュート切り替え、LED の色設定、スタンバイ移行、センサー読み取りなど。これは C 言語ライブラリではなく **C++** です。フレームワークは [`main/mcp_server.h`](main/mcp_server.h) にある少数のヘッダークラス群（`McpServer`、`McpTool`、`Property`、`PropertyList`）です。cJSON（C 言語ライブラリ）は JSON-RPC ペイロードのシリアライズに内部的に使われるだけで、通常のツール開発では一切触れません。
+
+#### MCP ツール vs. 物理ボタン
+
+これらは別のレイヤーであり、混同しやすいものです：
+
+- **物理ボタン**（スタンバイ、ミュート、boot）はボードの `.cc` 内で `Button` クラスを介して配線され、通常は `ToggleChatState()` のような `Application` API を呼びます。人が押したときだけ動作します。
+- **MCP ツール**は*同じ機能*をネットワーク経由で LLM やコンパニオンアプリに公開するため、モデルがそれを実行できます（「ミュートして」「スタンバイにして」）。
+
+ミュートやスタンバイのような機能では、1 つのハンドラーメソッドを書き、ボタンのコールバックと MCP ツールの**両方**をそこに繋ぐのが良いパターンです。
+
+#### 候補機能の見つけ方
+
+ボード上の状態を持つもの、制御できるものはすべて候補です。よく現れる形は **getter + setter** のペア（現在の状態を読む、それを変更する）で、`Settings` ヘルパーで設定を永続化して再起動後も保持します。コピーできる既存のツリー内サンプル：
+
+| 機能 | 場所 | ツール名 |
+|------|------|----------|
+| 長押しトーク vs クリックトークのモード | [`main/boards/common/press_to_talk_mcp_tool.cc`](main/boards/common/press_to_talk_mcp_tool.cc) | `self.set_press_to_talk` |
+| RGB LED ストリップ | [`main/boards/df-k10/led_control.cc`](main/boards/df-k10/led_control.cc) | `self.led_strip.get_brightness`、`self.led_strip.set_brightness`、`self.led_strip.set_all_color` など |
+| 音量 / 画面 / カメラ | [`main/mcp_server.cc`](main/mcp_server.cc) の `AddCommonTools()` | `self.audio_speaker.set_volume`、`self.screen.set_brightness`、`self.camera.take_photo` |
+
+#### ツールの登録場所
+
+- すべてのボードで共有される**共通ツール**（音量、明るさ、テーマ、カメラ、デバイス状態）は `main/mcp_server.cc` の `McpServer::AddCommonTools()` にあります。ここにボード固有のツールを**追加しないでください**。
+- **ボード固有のツール**は、ボードクラスの `InitializeTools()` メソッドに置き、ボードのコンストラクタから呼びます。`Application` は起動時に一度 `AddCommonTools()` / `AddUserOnlyTools()` を呼び（`main/application.cc` 参照）、共通ツールをボードのツールの前に挿入します。
+
+#### ツールの構造
+
+```cpp
+McpServer::GetInstance().AddTool(
+    "self.audio_speaker.set_mute",          // 名前：self.<ドメイン>.<アクション>
+    "Mute or unmute the speaker.",          // 説明。モデルはこれを読んで呼び出すか判断する
+    PropertyList({                          // 入力スキーマ（空の PropertyList() = 引数なし）
+        Property("mute", kPropertyTypeBoolean)
+    }),
+    [this](const PropertyList& properties) -> ReturnValue {   // コールバック
+        bool mute = properties["mute"].value<bool>();
+        Board::GetInstance().GetAudioCodec()->EnableOutput(!mute);
+        return true;                        // ReturnValue: bool | int | std::string | cJSON* | ImageContent*
+    });
+```
+
+プロパティの型とルール（`mcp_server.h` より）：
+
+- `kPropertyTypeBoolean`、`kPropertyTypeInteger`、`kPropertyTypeString`。
+- **デフォルト値のないプロパティは必須**です。デフォルト値付きで構築したものは任意です。
+- 整数は範囲を取れます：`Property("level", kPropertyTypeInteger, 0, 8)`（最小/最大）または `Property("level", kPropertyTypeInteger, 4, 0, 8)`（デフォルト、最小、最大）。範囲外の値は例外を投げ、MCP エラーとして返されます。
+- コールバック内では `properties["name"].value<T>()` で引数を読みます。
+
+#### 通常ツール vs. user-only ツール
+
+- `AddTool(...)`——LLM から見える。アシスタントが自分で実行してよい操作に使います。
+- `AddUserOnlyTool(...)`——`audience: ["user"]` が注釈され、モデルからは隠され、コンパニオンアプリ／明示的なユーザー操作からのみ呼べます。`self.reboot`、`self.upgrade_firmware`、診断などの慎重に扱うべき操作に使います。
+
+#### 実例：エンドツーエンドの「スタンバイ」機能
+
+本プロジェクトにはすでに第一級のアイドル/スリープ機構があります——`PowerSaveTimer`（[`main/boards/common/power_save_timer.h`](main/boards/common/power_save_timer.h)）。以下の例はスタンバイを 3 通り——物理ボタン、MCP ツール、自動アイドルタイムアウト——で接続し、すべてが**同一**のハンドラーを共有するため、LLM、コンパニオンアプリ、人のいずれも同じ振る舞いを起こせます。
+
+```cpp
+#include "wifi_board.h"
+#include "audio/audio_codec.h"
+#include "boards/common/button.h"
+#include "boards/common/power_save_timer.h"
+#include "mcp_server.h"
+#include "config.h"
+#include <esp_log.h>
+
+#define TAG "MyBoard"
+
+class MyBoard : public WifiBoard {
+private:
+    Button standby_button_{STANDBY_BUTTON_GPIO};   // ボードの config.h から
+    PowerSaveTimer* power_save_timer_ = nullptr;
+    bool in_standby_ = false;
+
+    // ---- ボタン + MCP ツール + アイドルタイマーで共有する単一ハンドラー ----
+    void EnterStandby() {
+        if (in_standby_) return;
+        in_standby_ = true;
+        ESP_LOGI(TAG, "Entering standby");
+        GetAudioCodec()->EnableOutput(false);          // スピーカーを消音
+        if (auto* bl = GetBacklight()) {
+            bl->SetBrightness(0, true);                 // 画面オフ
+        }
+    }
+
+    void ExitStandby() {
+        if (!in_standby_) return;
+        in_standby_ = false;
+        ESP_LOGI(TAG, "Leaving standby");
+        GetAudioCodec()->EnableOutput(true);
+        if (auto* bl = GetBacklight()) {
+            bl->RestoreBrightness();                    // ユーザーの明るさに戻す
+        }
+    }
+
+    // ---- 1. アイドル後の自動スタンバイ ----
+    void InitializePowerSaveTimer() {
+        // cpu_max_freq, seconds_to_sleep, seconds_to_shutdown(-1 = しない)
+        power_save_timer_ = new PowerSaveTimer(-1, 60);
+        power_save_timer_->OnEnterSleepMode([this]() { EnterStandby(); });
+        power_save_timer_->OnExitSleepMode([this]() { ExitStandby(); });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    // ---- 2. 物理ボタン：長押しでスタンバイ、クリックで復帰 ----
+    void InitializeButtons() {
+        standby_button_.OnLongPress([this]() { EnterStandby(); });
+        standby_button_.OnClick([this]() {
+            power_save_timer_->WakeUp();   // アイドルタイマーをリセットし OnExitSleepMode を発火
+        });
+    }
+
+    // ---- 3. MCP ツール：アシスタント / コンパニオンアプリに実行させる ----
+    void InitializeTools() {
+        auto& mcp = McpServer::GetInstance();
+
+        mcp.AddTool("self.system.enter_standby",
+            "Put the device into low-power standby. The screen and speaker turn off. "
+            "The device wakes on a button press.",
+            PropertyList(),                            // 引数なし
+            [this](const PropertyList&) -> ReturnValue {
+                EnterStandby();
+                return true;
+            });
+
+        // モデルが「スタンバイ中？」に答えられるよう getter を用意
+        mcp.AddTool("self.system.get_standby",
+            "Returns true if the device is currently in standby.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                return in_standby_;                    // ReturnValue は bool を受け取れる
+            });
+    }
+
+public:
+    MyBoard() {
+        InitializePowerSaveTimer();
+        InitializeButtons();
+        InitializeTools();      // ツールはコンストラクタ中に登録する必要がある
+    }
+
+    virtual AudioCodec* GetAudioCodec() override { /* ...あなたの codec... */ }
+    virtual Display* GetDisplay() override { /* ...あなたの display... */ }
+};
+
+DECLARE_BOARD(MyBoard);
+```
+
+各部分のつながり：
+
+- **`PowerSaveTimer(cpu_max_freq, seconds_to_sleep, seconds_to_shutdown)`** は、`seconds_to_sleep` 秒の無活動後に `OnEnterSleepMode` を、復帰時に `OnExitSleepMode` を発火します。`WakeUp()` はカウントダウンをリセットしてスリープを抜けます——ユーザー操作のたびに呼んでください。任意の `seconds_to_shutdown` は完全電源オフ経路のために `OnShutdownRequest` を駆動します（ここでは `-1`/しない）。
+- **ボタンとツールはどちらも同じ `EnterStandby()` を呼ぶ**——これが要のパターンです。ボタンはオフラインで動作し、MCP ツールは LLM（「スタンバイにして」）やコンパニオンアプリがネットワーク経由で同じ振る舞いを起こせます。
+- **`EnableOutput(false)` + `SetBrightness(0)`** は、ボードがスピーカーと画面を静かにする実際のツリー内のやり方です。真のディープスリープが必要なら、`esp-spot`（[`main/boards/esp-spot/esp_spot_board.cc`](main/boards/esp-spot/esp_spot_board.cc)）は `EnterDeepSleep()` 内で GPIO/IMU ウェイクソース付きの `esp_deep_sleep` まで踏み込みます——「画面 + 音声オフ」で足りない場合はそのモデルに倣ってください。
+
+`STANDBY_BUTTON_GPIO` はボードの `config.h` のピンに、`GetAudioCodec()`/`GetDisplay()`/`GetBacklight()` のオーバーライドはあなたのハードウェアに合わせてください。
+
+#### テスト
+
+ボードをビルドして書き込み、バックエンドからその WebSocket/MQTT トランスポート経由でデバイスを駆動します——サーバーが `tools/list`（あなたのツールが現れるはず）と `tools/call` を送ります。JSON-RPC のフレーミングと正確な `initialize` / `tools/list` / `tools/call` フローは [docs/mcp-protocol.md](docs/mcp-protocol.md) に記載されています。カメラツール専用にはローカルハーネス `scripts/local_camera_mcp_harness.py` があります。
+
 ## 大規模モデル設定
 
 すでにシャオジーAIチャットボットデバイスをお持ちで、公式サーバーに接続済みの場合は、[xiaozhi.me](https://xiaozhi.me) コンソールで設定できます。
