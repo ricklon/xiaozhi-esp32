@@ -12,7 +12,7 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 
 ---
 
-## ESP32-S3 Boards (35)
+## ESP32-S3 Boards (37)
 
 | Board | Status | Last Tested | Working Features | Issues | Notes |
 |-------|--------|-------------|------------------|--------|-------|
@@ -46,9 +46,11 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 | m5stack-core-s3 | ❌ Not Supported | | | | |
 | movecall-cuican-esp32s3 | ❌ Not Supported | | | | |
 | movecall-moji-esp32s3 | ❌ Not Supported | | | | |
+| quandong-s3-dev | ⚠️ Untested | | | | New from upstream sync 2026-05-28 (+AEC) |
 | sp-esp32-s3-1.28-box | 🔧 Needs Update | | | | |
 | sp-esp32-s3-1.54-muma | 🔧 Needs Update | | | | |
 | taiji-pi-s3 | ❌ Not Supported | | | | |
+| waveshare/esp32-s3-rgb-matrix | ⚠️ Untested | | | | New from upstream sync 2026-05-28 (HUB75) |
 | xiao-esp32-s3-sense | ✅ Tested & Working | 2026-05 | WiFi, Audio, Display, Camera, Wake word | | User verified |
 | yunliao-s3 | ❌ Not Supported | | | | |
 
@@ -66,10 +68,12 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 | xmini-c3-4g | ❌ Not Supported | | | | |
 | xmini-c3-v3 | ❌ Not Supported | | | | |
 
-## ESP32-C6 Boards (1)
+## ESP32-C6 Boards (3)
 
 | Board | Status | Last Tested | Working Features | Issues | Notes |
 |-------|--------|-------------|------------------|--------|-------|
+| waveshare/esp32-c6-lcd-0.85 | ⚠️ Untested | | | | New from upstream sync 2026-05-28 |
+| waveshare/esp32-c6-touch-lcd-1.54 | ⚠️ Untested | | | | New from upstream sync 2026-05-28 |
 | xiao-esp32-c6 | ✅ Tested & Working | | | | |
 
 ## ESP32-P4 Boards (4)
