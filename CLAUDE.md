@@ -164,8 +164,10 @@ python3 app.py
 
 ## Git
 
-Both `xiaozhi-esp32` and `xiaozhi-esp32-server` are forks. Push to the `ricklon` remote, not `origin`:
+Both `xiaozhi-esp32` and `xiaozhi-esp32-server` are forks owned by `ricklon`. In this clone, `origin` already points at the `ricklon/xiaozhi-esp32` fork (there is no separate `ricklon` remote), so push to `origin`:
 
 ```bash
-git push ricklon main
+git push origin main
 ```
+
+Verify with `git remote -v` before pushing — if a clone instead has upstream as `origin` and the fork as a `ricklon` remote, push to `ricklon` instead.
