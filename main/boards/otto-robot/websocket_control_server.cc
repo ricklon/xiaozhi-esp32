@@ -124,7 +124,7 @@ void WebSocketControlServer::HandleMessage(httpd_req_t *req, const char* data, s
     }
     
     if (len > 4096) {
-        ESP_LOGE(TAG, "Message too long: %zu bytes", len);
+        ESP_LOGE(TAG, "Message too long: %u bytes", (unsigned)len);
         return;
     }
     
@@ -177,14 +177,14 @@ void WebSocketControlServer::AddClient(httpd_req_t *req) {
     int sock_fd = httpd_req_to_sockfd(req);
     if (clients_.find(sock_fd) == clients_.end()) {
         clients_[sock_fd] = req;
-        ESP_LOGI(TAG, "Client connected: %d (total: %zu)", sock_fd, clients_.size());
+        ESP_LOGI(TAG, "Client connected: %d (total: %u)", sock_fd, (unsigned)clients_.size());
     }
 }
 
 void WebSocketControlServer::RemoveClient(httpd_req_t *req) {
     int sock_fd = httpd_req_to_sockfd(req);
     clients_.erase(sock_fd);
-    ESP_LOGI(TAG, "Client disconnected: %d (total: %zu)", sock_fd, clients_.size());
+    ESP_LOGI(TAG, "Client disconnected: %d (total: %u)", sock_fd, (unsigned)clients_.size());
 }
 
 size_t WebSocketControlServer::GetClientCount() const {
