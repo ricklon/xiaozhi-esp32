@@ -11,6 +11,9 @@
 #include <thread>
 #include <mbedtls/base64.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+
 #include <cJSON.h>
 
 class ImageContent {
@@ -212,6 +215,10 @@ private:
     PropertyList properties_;
     std::function<ReturnValue(const PropertyList&)> callback_;
     bool user_only_ = false;
+    // When true, the tool runs on a dedicated worker task instead of the main
+    // application loop, so a long/blocking call (e.g. camera upload) does not
+    // stall audio and the state machine.
+    bool async_ = false;
 
 public:
     McpTool(const std::string& name, 
@@ -224,6 +231,8 @@ public:
         callback_(callback) {}
 
     void set_user_only(bool user_only) { user_only_ = user_only; }
+    void set_async(bool async) { async_ = async; }
+    inline bool async() const { return async_; }
     inline const std::string& name() const { return name_; }
     inline const std::string& description() const { return description_; }
     inline const PropertyList& properties() const { return properties_; }
@@ -338,7 +347,12 @@ private:
     void GetToolsList(const std::string& id_json, const std::string& cursor, bool list_user_only_tools);
     void DoToolCall(const std::string& id_json, const std::string& tool_name, const cJSON* tool_arguments);
 
+    // Lazily create the serialized worker task that runs async tools off the main loop.
+    void EnsureToolWorker();
+    static void ToolCallTask(void* arg);
+
     std::vector<McpTool*> tools_;
+    QueueHandle_t tool_queue_ = nullptr;
 };
 
 #endif // MCP_SERVER_H
