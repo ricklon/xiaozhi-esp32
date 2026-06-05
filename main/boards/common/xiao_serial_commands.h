@@ -1,7 +1,7 @@
 #pragma once
 
 // Shared serial command handler for board builds that opt into the console.
-// Handles: !wifi, !server, !status, !camera, !reboot, !help
+// Handles: !wifi, !server, !hub-token, !status, !camera, !reboot, !help
 // Anything else is forwarded to the chat pipeline.
 
 #include "application.h"
@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <string>
 
 static const char* GetXiaoSerialBoardName() {
 #if CONFIG_BOARD_TYPE_XIAO_ESP32C3
@@ -48,7 +49,7 @@ static const char* TrimXiaoSerialLine(char* buf) {
     }
 
     const char* known_commands[] = {
-        "!reboot", "!status", "!camera", "!server", "!wifi", "!stop", "!help"
+        "!reboot", "!status", "!camera", "!server", "!hub-token", "!wifi", "!stop", "!help"
     };
     for (const char* command : known_commands) {
         char* command_start = strstr(start, command);
@@ -65,6 +66,16 @@ static const char* TrimXiaoSerialLine(char* buf) {
     }
 
     return start;
+}
+
+static std::string MaskXiaoSerialSecret(const std::string& value) {
+    if (value.empty()) {
+        return "not configured";
+    }
+    if (value.length() <= 8) {
+        return "configured";
+    }
+    return value.substr(0, 4) + "..." + value.substr(value.length() - 4);
 }
 
 static void HandleXiaoSerialLine(const char* buf) {
@@ -135,12 +146,38 @@ static void HandleXiaoSerialLine(const char* buf) {
         return;
     }
 
+    // --- !hub-token ---
+    if (strncmp(buf, "!hub-token", 10) == 0 && (buf[10] == ' ' || buf[10] == '\0')) {
+        const char* args = buf[10] == ' ' ? buf + 11 : "";
+        if (strlen(args) == 0) {
+            Settings s("agent_hub", false);
+            std::string token = s.GetString("enrollment_token");
+            printf("\r\nAgent Hub enrollment token: %s\r\n", MaskXiaoSerialSecret(token).c_str());
+            printf("Usage: !hub-token TOKEN  or  !hub-token clear\r\n\r\n");
+        } else if (strcmp(args, "clear") == 0) {
+            Settings s("agent_hub", true);
+            s.EraseKey("enrollment_token");
+            printf("\r\n=== Agent Hub Token Cleared ===\r\n\r\n");
+        } else {
+            Settings s("agent_hub", true);
+            s.SetString("enrollment_token", args);
+            printf("\r\n=== Agent Hub Token Configured ===\r\n");
+            printf("Token: %s\r\n", MaskXiaoSerialSecret(args).c_str());
+            printf("The token will be sent on the next OTA check-in.\r\n");
+            printf("================================\r\n\r\n");
+        }
+        fflush(stdout);
+        return;
+    }
+
     // --- !status ---
     if (strcmp(buf, "!status") == 0) {
         auto& wifi = WifiManager::GetInstance();
         Settings s("wifi", false);
         std::string ota_url = s.GetString("ota_url");
         if (ota_url.empty()) ota_url = std::string(CONFIG_OTA_URL) + " (default)";
+        Settings hub("agent_hub", false);
+        std::string hub_token = hub.GetString("enrollment_token");
         printf("\r\n========== DEVICE STATUS ==========\r\n");
         printf("Firmware : %s\r\n", esp_app_get_description()->version);
         printf("Board    : %s\r\n", GetXiaoSerialBoardName());
@@ -149,6 +186,7 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("IP Address: %s\r\n", wifi.GetIpAddress().c_str());
         printf("-----------------------------------\r\n");
         printf("OTA URL  : %s\r\n", ota_url.c_str());
+        printf("Hub Token: %s\r\n", MaskXiaoSerialSecret(hub_token).c_str());
         printf("-----------------------------------\r\n");
         printf("Free heap: %lu bytes\r\n", (unsigned long)esp_get_free_heap_size());
         printf("Camera   : %s\r\n", Board::GetInstance().GetCamera() ? "available" : "not available");
@@ -247,7 +285,10 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !server IP           -- set server IP and reboot\r\n");
         printf("  !server URL          -- set full OTA URL and reboot\r\n");
         printf("  !server              -- show current server URL\r\n");
-        printf("  !status              -- show WiFi, IP, server, heap\r\n");
+        printf("  !hub-token TOKEN     -- set Agent Hub enrollment token\r\n");
+        printf("  !hub-token           -- show whether Agent Hub token is configured\r\n");
+        printf("  !hub-token clear     -- remove Agent Hub enrollment token\r\n");
+        printf("  !status              -- show WiFi, IP, server, hub token, heap\r\n");
         printf("  !camera              -- capture one camera frame\r\n");
         printf("  !mic [gain N]        -- set mic gain (float, e.g. 30.0)\r\n");
         printf("  !mic [mute|unmute]   -- mute/unmute microphone\r\n");

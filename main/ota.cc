@@ -68,6 +68,12 @@ std::unique_ptr<Http> Ota::SetupHttp() {
     http->SetHeader("Accept-Language", Lang::CODE);
     http->SetHeader("Content-Type", "application/json");
 
+    Settings agent_hub_settings("agent_hub", false);
+    std::string enrollment_token = agent_hub_settings.GetString("enrollment_token");
+    if (!enrollment_token.empty()) {
+        http->SetHeader("X-Agent-Hub-Enrollment-Token", enrollment_token.c_str());
+    }
+
     return http;
 }
 

@@ -32,9 +32,9 @@ code ~/esp-projects/xiaozhi-esp32
 
 ### 3. Configure for ESP32-S3
 
-**Option A: Use the switcher script**
+**Option A: Use just**
 ```bash
-./switch-board.sh s3
+just setup xiao-esp32-s3-sense
 ```
 
 **Option B: Use VS Code Command Palette**
@@ -66,13 +66,13 @@ XiaoZhi AI Chatbot Configuration
 
 ```bash
 # Build only
-idf.py build
+just build xiao-esp32-s3-sense
 
-# Build and flash
-idf.py build flash
+# Flash
+just flash xiao-esp32-s3-sense /dev/ttyUSB0
 
-# Build, flash, and monitor
-idf.py build flash monitor
+# Monitor serial output
+just monitor /dev/ttyUSB0
 
 # Or use VS Code tasks:
 # Ctrl+Shift+P -> "Run Task" -> "XiaoZhi: Full Deploy"
@@ -83,7 +83,7 @@ idf.py build flash monitor
 If you want to use the **ESP32-C3** instead:
 
 ```bash
-./switch-board.sh c3
+just setup xiao-esp32-c3
 ```
 
 Or in VS Code:
@@ -179,46 +179,69 @@ GND           --> GND
 5. Register and add device with activation code
 6. Free Qwen AI access for personal use!
 
+## Use An Agent Hub Server
+
+To use an agent-hub-compatible server while keeping the XiaoZhi protocol flow, configure the OTA/check-in URL to the permanent alias:
+
+```text
+!server http://HOST:8003/xiaozhi/ota/
+```
+
+If the server requires enrollment, set the optional enrollment token over serial:
+
+```text
+!hub-token ENROLLMENT_TOKEN
+```
+
+Check or clear it without printing the full secret:
+
+```text
+!hub-token
+!hub-token clear
+```
+
+During check-in, the firmware sends the token as `X-Agent-Hub-Enrollment-Token`. The server should return `websocket.url` and `websocket.token`; the device stores both and uses `Authorization: Bearer <token>` when it opens `/xiaozhi/v1/`. Without a configured enrollment token, check-in remains compatible with unauthenticated LAN/dev servers.
+
 ## Troubleshooting
 
 ### Build Errors:
 ```bash
 # Clean and rebuild
-idf.py fullclean
-idf.py set-target esp32s3
-idf.py build
+just clean xiao-esp32-s3-sense
+just setup xiao-esp32-s3-sense
+just build xiao-esp32-s3-sense
 ```
 
 ### Flash Errors:
 ```bash
 # Hold BOOT button while flashing
 # Or try lower baud rate
-idf.py -p /dev/ttyUSB0 -b 115200 flash
+just flash xiao-esp32-s3-sense /dev/ttyUSB0
 ```
 
 ### Monitor Garbled Text:
 ```bash
 # Check baud rate (should be 115200)
-idf.py -p /dev/ttyUSB0 monitor
+just monitor /dev/ttyUSB0
 ```
 
 ## Switch Between Boards
 
 ```bash
-# Switch to S3
-./switch-board.sh s3
+# Prepare S3
+just setup xiao-esp32-s3-sense
 
-# Switch to C3
-./switch-board.sh c3
+# Prepare C3
+just setup xiao-esp32-c3
 
 # Check status
-./switch-board.sh status
+just status xiao-esp32-s3-sense
 ```
 
 ## Next Steps
 
 1. ✅ Connect ESP32-S3
-2. ✅ Run `./switch-board.sh s3`
+2. ✅ Run `just setup xiao-esp32-s3-sense`
 3. ✅ Configure Wi-Fi in menuconfig
 4. ✅ Build and flash
 5. ✅ Register on xiaozhi.me

@@ -19,7 +19,7 @@ This fork adds a supported-board workflow for event demos, local testing, and En
 - `uv`-managed web flasher serving for Python tooling, matching Astral `uv` conventions.
 - Web Serial console improvements that avoid toggling USB serial control signals, reducing unwanted ESP32 USB resets in Chrome.
 - Playwright regression coverage for the serial console connection flow.
-- Shared serial commands for supported boards: `!status`, `!server`, `!wifi`, `!camera`, `!reboot`, and `!help`.
+- Shared serial commands for supported boards: `!status`, `!server`, `!hub-token`, `!wifi`, `!camera`, `!reboot`, and `!help`.
 - Camera diagnostics for the XIAO ESP32-S3 Sense, including a one-command capture check.
 - MCP capability metadata and user-only diagnostic tools so companion software can discover board capabilities and run lightweight checks.
 - Supported firmware packaging for XIAO ESP32-C3, XIAO ESP32-C6, XIAO ESP32-S3 Sense, and Waveshare ESP32-S3 Touch AMOLED 1.8.
@@ -35,18 +35,18 @@ The upstream project supports many boards. This fork currently focuses release a
 | Seeed XIAO ESP32-S3 Sense | `s3` | OV2640 camera supported and verified with serial `!camera`. |
 | Waveshare ESP32-S3 Touch AMOLED 1.8 | `waveshare-s3-amoled18` | AMOLED, touch, audio, wake word, Wi-Fi, and MCP screen/audio tools. |
 
-Use the board switcher for local builds:
+Use `just` for local builds:
 
 ```bash
-./switch-board.sh xiao-esp32-s3-sense build
-./switch-board.sh xiao-esp32-s3-sense flash /dev/ttyACM0
+just build xiao-esp32-s3-sense
+just flash xiao-esp32-s3-sense /dev/ttyACM0
 ```
 
 For Waveshare:
 
 ```bash
-./switch-board.sh waveshare/esp32-s3-touch-amoled-1.8 build
-./switch-board.sh waveshare/esp32-s3-touch-amoled-1.8 flash /dev/ttyACM0
+just build waveshare/esp32-s3-touch-amoled-1.8
+just flash waveshare/esp32-s3-touch-amoled-1.8 /dev/ttyACM0
 ```
 
 ## Version Notes
@@ -160,9 +160,12 @@ Then open the local URL printed by the server in Chrome or another browser with 
 The serial console supports these commands:
 
 ```text
-!status              show firmware, board, Wi-Fi, IP, OTA URL, heap, camera
+!status              show firmware, board, Wi-Fi, IP, OTA URL, hub token status, heap, camera
 !server IP           set OTA/server URL to http://IP:8003/xiaozhi/ota/ and reboot
 !server URL          set a full OTA/server URL and reboot
+!hub-token TOKEN     set an optional agent-hub enrollment token
+!hub-token           show whether an agent-hub enrollment token is configured
+!hub-token clear     remove the agent-hub enrollment token
 !wifi SSID PASSWORD  add a saved Wi-Fi network
 !wifi list           list saved Wi-Fi networks
 !wifi clear          remove saved Wi-Fi networks
@@ -172,6 +175,20 @@ The serial console supports these commands:
 ```
 
 The firmware connects to the official [xiaozhi.me](https://xiaozhi.me) server by default unless you configure a local/self-hosted server. Personal users can register an account to use the Qwen real-time model for free.
+
+For an agent-hub server, point the OTA/check-in URL at the permanent XiaoZhi-compatible alias:
+
+```text
+!server http://HOST:8003/xiaozhi/ota/
+```
+
+If the server requires enrollment, configure the optional enrollment token:
+
+```text
+!hub-token ENROLLMENT_TOKEN
+```
+
+On OTA check-in, the device sends the token as `X-Agent-Hub-Enrollment-Token`. The server should return the normal `websocket` object with `url` and `token` fields. The firmware already persists string fields from that object into the `websocket` NVS namespace; when opening `/xiaozhi/v1/`, it reads `websocket.token` and sends `Authorization: Bearer <token>`. If no enrollment token is configured, the check-in request is unchanged for unauthenticated LAN/dev servers.
 
 👉 [Beginner's Firmware Flashing Guide](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
 
@@ -191,10 +208,10 @@ Common local commands:
 python3 scripts/supported_boards.py
 
 # Build a supported board with isolated per-board build output
-./switch-board.sh xiao-esp32-c3 build
+just build xiao-esp32-c3
 
 # Flash a board
-./switch-board.sh xiao-esp32-c3 flash /dev/ttyACM0
+just flash xiao-esp32-c3 /dev/ttyACM0
 
 # Run the web serial regression test
 cd web-flasher

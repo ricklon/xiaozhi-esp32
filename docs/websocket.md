@@ -16,6 +16,7 @@ This document describes the WebSocket communication protocol between the device 
 2. **Opening the WebSocket connection**
    - When the device needs to start a voice session (wake-up, button press, etc.), it calls `OpenAudioChannel()`:
      - Reads the WebSocket URL from settings.
+     - Reads the optional WebSocket token from settings.
      - Sets the request headers (`Authorization`, `Protocol-Version`, `Device-Id`, `Client-Id`).
      - Calls `Connect()` to establish the WebSocket connection.
 
@@ -90,6 +91,29 @@ When establishing the WebSocket connection, the device sets the following header
 - `Client-Id`: a software-generated UUID (reset when NVS is erased or the full firmware is re-flashed).
 
 These headers are sent with the WebSocket handshake; the server can use them for authentication or bookkeeping.
+
+### 2.1 OTA Check-In And Agent Hub Enrollment
+
+The device obtains WebSocket settings during OTA/check-in before opening the audio channel. The check-in URL is read from the `wifi` NVS setting `ota_url`; if unset, `CONFIG_OTA_URL` is used. Query strings in the configured OTA URL are passed through unchanged.
+
+For agent-hub compatibility, `/xiaozhi/ota/` remains the permanent check-in alias. If the optional `agent_hub` NVS setting `enrollment_token` is configured, the device adds this HTTP header to the check-in request:
+
+```http
+X-Agent-Hub-Enrollment-Token: <token>
+```
+
+The server response should include the normal `websocket` object. String fields in that object are persisted into the `websocket` NVS namespace. For authenticated sessions, return a `token` field next to the `url`:
+
+```json
+{
+  "websocket": {
+    "url": "ws://HOST:8003/xiaozhi/v1/",
+    "token": "SESSION_TOKEN"
+  }
+}
+```
+
+No extra firmware change is needed for WebSocket session auth beyond returning `websocket.token`: `OpenAudioChannel()` already reads it and sends `Authorization: Bearer <token>`, adding the `Bearer ` prefix when the stored token does not already include a scheme. If no enrollment token is configured, no agent-hub enrollment header is sent and unauthenticated LAN/dev behavior is unchanged.
 
 ---
 
@@ -414,7 +438,7 @@ stateDiagram
 ## 8. Other Notes
 
 1. **Authentication**
-   - The device supplies `Authorization: Bearer <token>`; the server must validate it.
+   - If a `websocket.token` was returned during check-in, the device supplies `Authorization: Bearer <token>`; the server must validate it.
    - If the token is missing or invalid the server may reject the handshake or terminate the session later.
 
 2. **Session scope**

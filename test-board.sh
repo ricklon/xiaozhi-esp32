@@ -49,7 +49,7 @@ echo "Attempting to build..."
 if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo ""
     echo "✅ Build successful for $BOARD"
-    echo "   You can now flash with: ./switch-board.sh $BOARD flash"
+    echo "   You can now flash with: just flash $BOARD"
 else
     echo ""
     echo "❌ Build failed for $BOARD"
