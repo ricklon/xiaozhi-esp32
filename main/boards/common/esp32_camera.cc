@@ -8,6 +8,7 @@
 
 #include "esp32_camera.h"
 #include "board.h"
+#include "application.h"
 #include "display.h"
 #include "lvgl_display.h"
 #include "mcp_server.h"
@@ -112,16 +113,23 @@ bool Esp32Camera::Capture() {
             uint8_t *preview_data = (uint8_t *)heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (preview_data != nullptr) {
                 memcpy(preview_data, encode_buf_, data_size);
-                display->SetPreviewImage(std::make_unique<LvglAllocatedImage>(preview_data, data_size, current_fb_->width, current_fb_->height, current_fb_->width * 2, LV_COLOR_FORMAT_RGB565));
+                // Capture() may run on the MCP worker task; LVGL is not thread-safe,
+                // so hand the preview to the main loop. Raw pointers are captured
+                // because std::function requires a copyable target.
+                auto *image = new LvglAllocatedImage(preview_data, data_size, current_fb_->width, current_fb_->height, current_fb_->width * 2, LV_COLOR_FORMAT_RGB565);
+                Application::GetInstance().Schedule([display, image]() {
+                    display->SetPreviewImage(std::unique_ptr<LvglAllocatedImage>(image));
+                });
             }
         }
     } else if (current_fb_->format == PIXFORMAT_JPEG) {
         // JPEG format preview usually requires decoding, skip preview display for now, just log
-        ESP_LOGW(TAG, "JPEG capture success, len=%zu, but not supported for preview", current_fb_->len);
+        // %zu is unsupported under newlib nano formatting; cast to unsigned.
+        ESP_LOGW(TAG, "JPEG capture success, len=%u, but not supported for preview", (unsigned)current_fb_->len);
     }
 
-    ESP_LOGI(TAG, "Captured frame: %dx%d, len=%zu, format=%d",
-             current_fb_->width, current_fb_->height, current_fb_->len, current_fb_->format);
+    ESP_LOGI(TAG, "Captured frame: %dx%d, len=%u, format=%d",
+             current_fb_->width, current_fb_->height, (unsigned)current_fb_->len, current_fb_->format);
 
     return true;
 }
@@ -158,15 +166,21 @@ std::string Esp32Camera::Explain(const std::string &question) {
         throw std::runtime_error("No camera frame captured");
     }
 
-    // Create local JPEG queue
-    QueueHandle_t jpeg_queue = xQueueCreate(40, sizeof(JpegChunk));
-    if (jpeg_queue == nullptr) {
-        ESP_LOGE(TAG, "Failed to create JPEG queue");
-        throw std::runtime_error("Failed to create JPEG queue");
-    }
+    // If the sensor already produced a JPEG, stream it directly and skip the
+    // re-encode entirely (no encoder thread, no SPIRAM chunk queue).
+    const bool jpeg_native = (current_fb_->format == PIXFORMAT_JPEG);
 
-    // Start encoding thread
-    encoder_thread_ = std::thread([this, jpeg_queue]() {
+    // Create local JPEG queue (only needed when we have to encode)
+    QueueHandle_t jpeg_queue = nullptr;
+    if (!jpeg_native) {
+        jpeg_queue = xQueueCreate(40, sizeof(JpegChunk));
+        if (jpeg_queue == nullptr) {
+            ESP_LOGE(TAG, "Failed to create JPEG queue");
+            throw std::runtime_error("Failed to create JPEG queue");
+        }
+
+        // Start encoding thread
+        encoder_thread_ = std::thread([this, jpeg_queue]() {
         int64_t start_time = esp_timer_get_time();
         uint16_t w = current_fb_->width;
         uint16_t h = current_fb_->height;
@@ -210,7 +224,7 @@ std::string Esp32Camera::Explain(const std::string &question) {
                 if (data != nullptr && len > 0) {
                     chunk.data = (uint8_t*)heap_caps_aligned_alloc(16, len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (chunk.data == nullptr) {
-                        ESP_LOGE(TAG, "Failed to allocate %zu bytes for JPEG chunk %zu", len, index);
+                        ESP_LOGE(TAG, "Failed to allocate %u bytes for JPEG chunk %u", (unsigned)len, (unsigned)index);
                         chunk.len = 0;
                     } else {
                         memcpy(chunk.data, data, len);
@@ -228,10 +242,15 @@ std::string Esp32Camera::Explain(const std::string &question) {
         }
         int64_t end_time = esp_timer_get_time();
         ESP_LOGI(TAG, "JPEG encoding time: %ld ms", int((end_time - start_time) / 1000));
-    });
+        });
+    }
 
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(3);
+    // Bound the upload/result round trip. The default socket timeout is short
+    // enough to falsely report failure on a slow vision server; this gives the
+    // server time to respond while still failing cleanly if it hangs.
+    http->SetTimeout(60000);
     std::string boundary = "----ESP32_CAMERA_BOUNDARY";
 
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
@@ -243,16 +262,18 @@ std::string Esp32Camera::Explain(const std::string &question) {
     http->SetHeader("Transfer-Encoding", "chunked");
     if (!http->Open("POST", explain_url_)) {
         ESP_LOGE(TAG, "Failed to connect to explain URL");
-        encoder_thread_.join();
-        JpegChunk chunk;
-        while (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) == pdPASS) {
-            if (chunk.data != nullptr) {
-                heap_caps_free(chunk.data);
-            } else {
-                break;
+        if (!jpeg_native) {
+            encoder_thread_.join();
+            JpegChunk chunk;
+            while (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) == pdPASS) {
+                if (chunk.data != nullptr) {
+                    heap_caps_free(chunk.data);
+                } else {
+                    break;
+                }
             }
+            vQueueDelete(jpeg_queue);
         }
-        vQueueDelete(jpeg_queue);
         throw std::runtime_error("Failed to connect to explain URL");
     }
 
@@ -274,27 +295,33 @@ std::string Esp32Camera::Explain(const std::string &question) {
     }
 
     size_t total_sent = 0;
-    bool saw_terminator = false;
-    while (true) {
-        JpegChunk chunk;
-        if (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) != pdPASS) {
-            ESP_LOGE(TAG, "Failed to receive JPEG chunk");
-            break;
+    if (jpeg_native) {
+        // Sensor frame is already JPEG: stream it straight from the frame buffer.
+        http->Write((const char *)current_fb_->buf, current_fb_->len);
+        total_sent = current_fb_->len;
+    } else {
+        bool saw_terminator = false;
+        while (true) {
+            JpegChunk chunk;
+            if (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) != pdPASS) {
+                ESP_LOGE(TAG, "Failed to receive JPEG chunk");
+                break;
+            }
+            if (chunk.data == nullptr) {
+                saw_terminator = true;
+                break;
+            }
+            http->Write((const char *)chunk.data, chunk.len);
+            total_sent += chunk.len;
+            heap_caps_free(chunk.data);
         }
-        if (chunk.data == nullptr) {
-            saw_terminator = true;
-            break;
-        }
-        http->Write((const char *)chunk.data, chunk.len);
-        total_sent += chunk.len;
-        heap_caps_free(chunk.data);
-    }
-    encoder_thread_.join();
-    vQueueDelete(jpeg_queue);
+        encoder_thread_.join();
+        vQueueDelete(jpeg_queue);
 
-    if (!saw_terminator || total_sent == 0) {
-        ESP_LOGE(TAG, "JPEG encoder failed or produced empty output");
-        throw std::runtime_error("Failed to encode image to JPEG");
+        if (!saw_terminator || total_sent == 0) {
+            ESP_LOGE(TAG, "JPEG encoder failed or produced empty output");
+            throw std::runtime_error("Failed to encode image to JPEG");
+        }
     }
 
     {
@@ -304,9 +331,13 @@ std::string Esp32Camera::Explain(const std::string &question) {
     }
     http->Write("", 0);
 
-    if (http->GetStatusCode() != 200) {
-        ESP_LOGE(TAG, "Failed to upload photo, status code: %d", http->GetStatusCode());
-        throw std::runtime_error("Failed to upload photo");
+    int status_code = http->GetStatusCode();
+    if (status_code != 200) {
+        // The image bytes were delivered; the failure is on the server/result side.
+        // Report that honestly so the model does not claim the photo failed to send.
+        ESP_LOGE(TAG, "Photo uploaded (%d bytes) but server returned status %d", (int)total_sent, status_code);
+        http->Close();
+        throw std::runtime_error("Photo uploaded but the vision server returned status " + std::to_string(status_code));
     }
 
     std::string result = http->ReadAll();

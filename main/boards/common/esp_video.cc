@@ -922,7 +922,7 @@ std::string EspVideo::Explain(const std::string& question) {
                 if (data != nullptr && len > 0) {
                     chunk.data = (uint8_t*)heap_caps_aligned_alloc(16, len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (chunk.data == nullptr) {
-                        ESP_LOGE(TAG, "Failed to allocate %zu bytes for JPEG chunk %zu", len, index);
+                        ESP_LOGE(TAG, "Failed to allocate %u bytes for JPEG chunk %u", (unsigned)len, (unsigned)index);
                         chunk.len = 0;
                     } else {
                         memcpy(chunk.data, data, len);

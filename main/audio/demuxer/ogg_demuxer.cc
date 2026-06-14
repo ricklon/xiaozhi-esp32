@@ -102,7 +102,7 @@ size_t OggDemuxer::Process(const uint8_t* data, size_t size)
                     return processed;  // 返回已处理的字节数
                 }
             } else {
-                ESP_LOGE(TAG, "OggDemuxer run in error state: bytes_needed=%zu", ctx_.bytes_needed);
+                ESP_LOGE(TAG, "OggDemuxer run in error state: bytes_needed=%u", (unsigned)ctx_.bytes_needed);
                 Reset();
                 return processed;
             }
@@ -208,7 +208,7 @@ size_t OggDemuxer::Process(const uint8_t* data, size_t size)
                 
                 // 检查缓冲区是否足够
                 if (ctx_.packet_len + seg_len > sizeof(ctx_.packet_buf)) {
-                    ESP_LOGE(TAG, "包缓冲区溢出: %zu + %u > %zu", ctx_.packet_len, seg_len, sizeof(ctx_.packet_buf));
+                    ESP_LOGE(TAG, "包缓冲区溢出: %u + %u > %u", (unsigned)ctx_.packet_len, seg_len, (unsigned)sizeof(ctx_.packet_buf));
                     state_ = ParseState::FIND_PAGE;
                     ctx_.packet_len = 0;
                     ctx_.packet_continued = false;
@@ -287,8 +287,8 @@ size_t OggDemuxer::Process(const uint8_t* data, size_t size)
             if (ctx_.seg_index == ctx_.seg_count) {
                 // 检查是否所有数据体都已读取
                 if (ctx_.body_offset < ctx_.body_size) {
-                    ESP_LOGW(TAG, "数据体不完整: %zu/%zu", 
-                            ctx_.body_offset, ctx_.body_size);
+                    ESP_LOGW(TAG, "数据体不完整: %u/%u",
+                            (unsigned)ctx_.body_offset, (unsigned)ctx_.body_size);
                 }
                 
                 // 如果包跨页，保持packet_len和packet_continued

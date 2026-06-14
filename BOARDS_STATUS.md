@@ -50,6 +50,7 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 | sp-esp32-s3-1.28-box | 🔧 Needs Update | | | | |
 | sp-esp32-s3-1.54-muma | 🔧 Needs Update | | | | |
 | taiji-pi-s3 | ❌ Not Supported | | | | |
+| waveshare/esp32-s3-cam | ⚠️ Untested | 2026-05-31 | Compiles (2.6M bin) | HW not verified | Second official camera board; shares common Esp32Camera path, inherits async-camera/MCP + %zu fixes; `just test` PASS |
 | waveshare/esp32-s3-rgb-matrix | ⚠️ Untested | 2026-05-28 | Compiles (2.6M bin) | HW not verified | New from upstream sync (HUB75); `just test` PASS |
 | xiao-esp32-s3-sense | ✅ Tested & Working | 2026-05 | WiFi, Audio, Display, Camera, Wake word | | User verified |
 | yunliao-s3 | ❌ Not Supported | | | | |

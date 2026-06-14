@@ -152,13 +152,28 @@ Commands at runtime (via serial terminal at 115200 baud):
 
 ## Local Server
 
-The companion server lives in `../xiaozhi-esp32-server/` (separate repo). It provides WebSocket (port 8000) and OTA HTTP (port 8003). The active override config is at `xiaozhi-esp32-server/main/xiaozhi-server/data/.config.yaml` — **not** `config.yaml` (which is the upstream default and should not be modified).
+The companion server is **agent-hub** at `~/Projects/agent-hub` (separate repo) — a clean Python reimplementation that replaces the older `xiaozhi-esp32-server`. It serves:
+
+- **Port 8000** — voice-session WebSocket (`/xiaozhi/v1/`) and vision/explain upload (`/xiaozhi/v1/image/`).
+- **Port 8003** — OTA check-in (`/xiaozhi/ota/`, `/checkin/`) and the dashboard (`/dashboard/`).
 
 Start the server:
 ```bash
-cd ~/esp-projects/xiaozhi-esp32-server/main/xiaozhi-server
-python3 app.py
+cd ~/Projects/agent-hub
+.venv/bin/python3 -m agent_hub.server   # or: just <recipe> — see agent-hub/justfile
 ```
+
+### Driving a device's MCP tools without serial
+
+agent-hub bridges device MCP tools, so you can exercise firmware through the dashboard once a device is connected. Device id is its MAC (e.g. `dc:da:0c:57:6f:94`):
+
+```bash
+DID=dc:da:0c:57:6f:94
+curl -s http://127.0.0.1:8003/dashboard/agents/$DID/status    # MCP ready? tool list
+curl -s -X POST http://127.0.0.1:8003/dashboard/agents/$DID/capture   # calls self.camera.take_photo over MCP
+```
+
+On the current bench host, agent-hub runs at `192.168.5.6` (so `!server 192.168.5.6` points the device here).
 
 ---
 

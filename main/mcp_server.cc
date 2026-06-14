@@ -108,7 +108,7 @@ void McpServer::AddCommonTools() {
 
     auto camera = board.GetCamera();
     if (camera) {
-        AddTool("self.camera.take_photo",
+        auto take_photo_tool = new McpTool("self.camera.take_photo",
             "Always remember you have a camera. If the user asks you to see something, use this tool to take a photo and then explain it.\n"
             "Args:\n"
             "  `question`: The question that you want to ask about the photo.\n"
@@ -127,6 +127,10 @@ void McpServer::AddCommonTools() {
                 auto question = properties["question"].value<std::string>();
                 return camera->Explain(question);
             });
+        // Capture + upload is slow and network-bound; run it on the worker task so
+        // it never blocks the audio loop.
+        take_photo_tool->set_async(true);
+        AddTool(take_photo_tool);
     }
 #endif
 
@@ -636,6 +640,44 @@ void McpServer::GetToolsList(const std::string& id_json, const std::string& curs
     ReplyResult(id_json, json);
 }
 
+// Heap-allocated work item handed to the async tool worker task.
+struct AsyncToolCall {
+    std::string id_json;
+    McpTool* tool;
+    PropertyList arguments;
+};
+
+void McpServer::ToolCallTask(void* arg) {
+    auto* server = static_cast<McpServer*>(arg);
+    AsyncToolCall* call = nullptr;
+    while (xQueueReceive(server->tool_queue_, &call, portMAX_DELAY) == pdPASS) {
+        if (call == nullptr) {
+            continue;
+        }
+        try {
+            // ReplyResult/ReplyError marshal the actual send back to the main
+            // task (Application::SendMcpMessage schedules it), so this is safe.
+            server->ReplyResult(call->id_json, call->tool->Call(call->arguments));
+        } catch (const std::exception& e) {
+            ESP_LOGE(TAG, "async tools/call: %s", e.what());
+            server->ReplyError(call->id_json, e.what(), -32603);
+        }
+        delete call;
+    }
+}
+
+void McpServer::EnsureToolWorker() {
+    if (tool_queue_ != nullptr) {
+        return;
+    }
+    tool_queue_ = xQueueCreate(4, sizeof(AsyncToolCall*));
+    if (tool_queue_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to create async tool queue");
+        return;
+    }
+    xTaskCreate(ToolCallTask, "mcp_tool", 1024 * 8, this, 3, nullptr);
+}
+
 void McpServer::DoToolCall(const std::string& id_json, const std::string& tool_name, const cJSON* tool_arguments) {
     auto tool_iter = std::find_if(tools_.begin(), tools_.end(), 
                                  [&tool_name](const McpTool* tool) { 
@@ -675,6 +717,18 @@ void McpServer::DoToolCall(const std::string& id_json, const std::string& tool_n
     } catch (const std::exception& e) {
         ESP_LOGE(TAG, "tools/call: %s", e.what());
         ReplyError(id_json, e.what(), -32602);
+        return;
+    }
+
+    // Long/blocking tools run on a serialized worker task so they don't stall
+    // the main application loop (audio, state machine).
+    if ((*tool_iter)->async()) {
+        EnsureToolWorker();
+        auto* call = new AsyncToolCall{ id_json, *tool_iter, std::move(arguments) };
+        if (tool_queue_ == nullptr || xQueueSend(tool_queue_, &call, 0) != pdPASS) {
+            delete call;
+            ReplyError(id_json, "Device is busy processing another request", -32603);
+        }
         return;
     }
 

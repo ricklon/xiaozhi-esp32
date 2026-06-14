@@ -172,7 +172,7 @@ namespace audio_wifi_config
         : input_buffer_size_(window_size), output_sample_count_(0) {
         if (sample_rate % bit_rate != 0) {
             // On ESP32 we can continue execution, but log the error
-            ESP_LOGW(kLogTag, "Sample rate %zu is not divisible by bit rate %zu", sample_rate, bit_rate);
+            ESP_LOGW(kLogTag, "Sample rate %u is not divisible by bit rate %u", (unsigned)sample_rate, (unsigned)bit_rate);
         }
 
         float normalized_mark_freq = static_cast<float>(mark_frequency) / static_cast<float>(sample_rate);
