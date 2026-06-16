@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>XiaoZhi Flasher</title>
+  <link rel="icon" href="data:,">
   <script type="module" src="vendor/esp-web-tools.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -194,6 +195,25 @@
       color: #7dd3fc;
     }
 
+    .docs-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: .75rem;
+      padding: .55rem .8rem;
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+      color: #7dd3fc;
+      text-decoration: none;
+      font-size: .85rem;
+      font-weight: 600;
+    }
+    .docs-link:hover {
+      border-color: #3b82f6;
+      color: #bfdbfe;
+    }
+
     /* Setup guide */
     .steps {
       display: flex;
@@ -237,6 +257,7 @@
 <header>
   <h1>XiaoZhi Flasher</h1>
   <p>Flash firmware and configure your device</p>
+  <a class="docs-link" href="docs.html#mcp">MCP architecture and protocol docs</a>
 </header>
 
 <!-- FLASH SECTION -->
@@ -258,10 +279,24 @@
       </esp-web-install-button>
     </div>
     <div class="board-card">
+      <h3>XIAO ESP32-C6 Eyes</h3>
+      <div class="specs">4MB · WiFi 6 · Servo MCP</div>
+      <esp-web-install-button manifest="manifest-c6-eyes.json">
+        <button slot="activate" class="flash-btn">Flash C6 Eyes</button>
+      </esp-web-install-button>
+    </div>
+    <div class="board-card">
       <h3>XIAO ESP32-S3 Sense</h3>
       <div class="specs">8MB · WiFi · Camera</div>
       <esp-web-install-button manifest="manifest-s3.json">
         <button slot="activate" class="flash-btn">Flash S3</button>
+      </esp-web-install-button>
+    </div>
+    <div class="board-card">
+      <h3>XIAO ESP32-S3 Eyes</h3>
+      <div class="specs">8MB · WiFi · Camera · Servo MCP</div>
+      <esp-web-install-button manifest="manifest-s3-eyes.json">
+        <button slot="activate" class="flash-btn">Flash S3 Eyes</button>
       </esp-web-install-button>
     </div>
     <div class="board-card">
@@ -330,6 +365,21 @@
     <div class="step">
       <span class="step-num">5</span>
       <div>Device will reboot and connect automatically. The console will try to reopen the serial port when the board returns.</div>
+    </div>
+  </div>
+</div>
+
+<!-- DOCUMENTATION -->
+<div class="section">
+  <div class="section-title">4. Learn What This Device Is</div>
+  <div class="steps">
+    <div class="step">
+      <span class="step-num">i</span>
+      <div>
+        XiaoZhi boards are voice AI microcontrollers that expose hardware capabilities through MCP tools.
+        Read the <a href="docs.html#mcp" style="color:#7dd3fc">MCP architecture and protocol section</a>
+        for the full documentation links, device architecture, and what to expect from a microcontroller MCP server.
+      </div>
     </div>
   </div>
 </div>

@@ -173,7 +173,24 @@ curl -s http://127.0.0.1:8003/dashboard/agents/$DID/status    # MCP ready? tool 
 curl -s -X POST http://127.0.0.1:8003/dashboard/agents/$DID/capture   # calls self.camera.take_photo over MCP
 ```
 
-On the current bench host, agent-hub runs at `192.168.5.6` (so `!server 192.168.5.6` points the device here).
+### Pointing a device at this server (verify, don't hardcode)
+
+The server's address changes machine to machine — **never assume a fixed IP**. Derive
+and verify it each time:
+
+```bash
+# 1. This host's LAN IP (the one on the same subnet as the device)
+ip -4 addr show | grep -oP 'inet \K[\d.]+' | grep -v '^127\.'
+
+# 2. Confirm agent-hub is actually listening before pointing a device at it
+ss -ltn '( sport = :8000 or sport = :8003 )'   # both ports should be LISTEN
+
+# 3. Sanity-check OTA reachability from this host (replace <ip> with step 1's value)
+curl -fsS http://<ip>:8003/xiaozhi/ota/ >/dev/null && echo "OTA reachable"
+```
+
+Then point the device with `!server <ip>` (the IP from step 1, verified in steps 2–3).
+The device must be on the **same subnet** as `<ip>` for it to connect.
 
 ---
 

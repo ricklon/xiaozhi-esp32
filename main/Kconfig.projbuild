@@ -158,8 +158,14 @@ choice BOARD_TYPE
     config BOARD_TYPE_XIAO_ESP32C6
         bool "Seeed XIAO ESP32-C6"
         depends on IDF_TARGET_ESP32C6
+    config BOARD_TYPE_XIAO_ESP32C6_EYES
+        bool "Seeed XIAO ESP32-C6 Eye Servo Breakout"
+        depends on IDF_TARGET_ESP32C6
     config BOARD_TYPE_XIAO_ESP32S3_SENSE
         bool "Seeed XIAO ESP32-S3 Sense (with OV2640 camera)"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_XIAO_ESP32S3_EYES
+        bool "Seeed XIAO ESP32-S3 Eye Servo Robot"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ESP_KORVO2_V3
         bool "Espressif Korvo2 V3"

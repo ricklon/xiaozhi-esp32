@@ -55,6 +55,7 @@ list(APPEND SOURCES
     "boards/common/button.cc"
     "boards/common/i2c_device.cc"
     "boards/common/knob.cc"
+    "boards/common/pca9685.cc"
     "boards/common/power_save_timer.cc"
     "boards/common/press_to_talk_mcp_tool.cc"
     "boards/common/sleep_timer.cc"
@@ -257,8 +258,16 @@ elseif(CONFIG_BOARD_TYPE_XIAO_ESP32C6)
     set(BOARD_TYPE "xiao-esp32-c6")
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
+elseif(CONFIG_BOARD_TYPE_XIAO_ESP32C6_EYES)
+    set(BOARD_TYPE "xiao-esp32-c6-eyes")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
+    set(BUILTIN_ICON_FONT font_awesome_14_1)
 elseif(CONFIG_BOARD_TYPE_XIAO_ESP32S3_SENSE)
     set(BOARD_TYPE "xiao-esp32-s3-sense")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
+    set(BUILTIN_ICON_FONT font_awesome_14_1)
+elseif(CONFIG_BOARD_TYPE_XIAO_ESP32S3_EYES)
+    set(BOARD_TYPE "xiao-esp32-s3-eyes")
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
 elseif(CONFIG_BOARD_TYPE_ESP_KORVO2_V3)

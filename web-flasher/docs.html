@@ -57,6 +57,7 @@
       margin-right: .5rem;
     }
     nav .sep { color: var(--border); }
+    a { color: var(--blue); }
 
     /* ── layout ── */
     .page { max-width: 820px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
@@ -181,6 +182,39 @@
       font-size: .83rem;
     }
 
+    /* -- documentation links -- */
+    .link-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: .75rem;
+      margin: 1rem 0;
+    }
+    .link-card {
+      display: block;
+      min-height: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .85rem 1rem;
+      text-decoration: none;
+    }
+    .link-card strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: .25rem;
+      font-size: .9rem;
+    }
+    .link-card span {
+      display: block;
+      color: var(--muted);
+      font-size: .82rem;
+      line-height: 1.45;
+    }
+    .link-card:hover {
+      border-color: var(--blue);
+      background: #1e293b;
+    }
+
     /* ── chip badges ── */
     .badge {
       display: inline-block;
@@ -223,6 +257,8 @@
   <a href="#wiring">Wiring</a>
   <a href="#assembly">Assembly</a>
   <a href="#commands">Commands</a>
+  <a href="#mcp">MCP</a>
+  <a href="#mcp-clients">Clients</a>
   <a href="#server">Server Setup</a>
 </nav>
 
@@ -566,6 +602,202 @@
       pointing at the right server before you start troubleshooting audio or AI issues.
     </span>
   </div>
+
+  <!-- ═══════════════════════════════════════════════ MCP -->
+  <h2 id="mcp"><a href="#mcp">MCP Device Control</a></h2>
+
+  <p>
+    In XiaoZhi, an MCP-capable microcontroller is a small <strong>Model Context Protocol server</strong>.
+    The AI backend is the MCP client. After the board connects over WiFi, the backend discovers
+    the tools exposed by the firmware and can call them to use real hardware: speaker controls,
+    display controls, camera capture, diagnostics, board-specific actions, and any custom tools
+    added by the board implementation.
+  </p>
+
+  <h3>Architecture</h3>
+  <ol>
+    <li>The board boots, connects to WiFi, and fetches its OTA/server settings.</li>
+    <li>The board opens the XiaoZhi transport: WebSocket, or MQTT plus UDP on supported servers.</li>
+    <li>The board advertises capabilities in its transport <code>hello</code>; MCP support appears as <code>"mcp": true</code>.</li>
+    <li>The backend sends an MCP <code>initialize</code> request to the device.</li>
+    <li>The backend calls <code>tools/list</code> to discover available device tools.</li>
+    <li>The backend calls <code>tools/call</code> when the model or companion app needs the hardware to do something.</li>
+  </ol>
+
+  <p>
+    MCP payloads are JSON-RPC 2.0 messages wrapped inside XiaoZhi transport messages with
+    <code>type: "mcp"</code>. Audio still streams through the normal voice path; MCP is the control
+    plane for hardware capabilities and diagnostics.
+  </p>
+
+  <h3>What to expect from a microcontroller MCP</h3>
+  <ul>
+    <li><strong>It exposes tools, not a desktop app.</strong> The firmware offers narrow hardware actions such as mute, status, camera capture, screen updates, LEDs, sensors, or robot movement.</li>
+    <li><strong>Tools depend on the board.</strong> A C3 audio board will expose fewer tools than an S3 Sense with a camera or a Waveshare board with a display and touch.</li>
+    <li><strong>It is resource constrained.</strong> Expect small JSON payloads, short tool responses, limited memory, and behavior that favors predictable device actions over large data exchange.</li>
+    <li><strong>The backend remains the client.</strong> The ESP32 does not run the LLM. It streams audio and serves MCP tools; the server handles speech recognition, model calls, vision explanation, and text-to-speech.</li>
+    <li><strong>Security still matters.</strong> Treat tool calls as real hardware control. Keep devices on trusted networks and expose only actions you are comfortable letting the assistant or companion app invoke.</li>
+  </ul>
+
+  <h3>Documentation links</h3>
+  <div class="link-grid">
+    <a class="link-card" href="https://modelcontextprotocol.io/docs" target="_blank" rel="noopener">
+      <strong>Official MCP Documentation</strong>
+      <span>Full Model Context Protocol documentation, concepts, SDKs, and specification index.</span>
+    </a>
+    <a class="link-card" href="https://modelcontextprotocol.io/docs/concepts/architecture" target="_blank" rel="noopener">
+      <strong>MCP Architecture Overview</strong>
+      <span>Client/server architecture, protocol layers, lifecycle, tools, resources, prompts, and notifications.</span>
+    </a>
+    <a class="link-card" href="https://modelcontextprotocol.io/specification/2024-11-05/basic" target="_blank" rel="noopener">
+      <strong>MCP 2024-11-05 Specification</strong>
+      <span>The protocol version used by the current XiaoZhi MCP implementation.</span>
+    </a>
+    <a class="link-card" href="https://www.jsonrpc.org/specification" target="_blank" rel="noopener">
+      <strong>JSON-RPC 2.0 Specification</strong>
+      <span>The request, response, notification, and error envelope used inside MCP payloads.</span>
+    </a>
+    <a class="link-card" href="https://github.com/ricklon/xiaozhi-esp32/blob/main/docs/mcp-protocol.md" target="_blank" rel="noopener">
+      <strong>XiaoZhi MCP Protocol Flow</strong>
+      <span>How MCP messages are wrapped over XiaoZhi WebSocket and MQTT transports.</span>
+    </a>
+    <a class="link-card" href="https://github.com/ricklon/xiaozhi-esp32/blob/main/docs/mcp-usage.md" target="_blank" rel="noopener">
+      <strong>Building MCP Tools</strong>
+      <span>How to register firmware tools for board features such as audio, display, camera, sensors, and standby.</span>
+    </a>
+    <a class="link-card" href="https://github.com/ricklon/xiaozhi-esp32/blob/main/docs/websocket.md" target="_blank" rel="noopener">
+      <strong>XiaoZhi WebSocket Protocol</strong>
+      <span>The voice and control transport used by browser-flashed devices.</span>
+    </a>
+    <a class="link-card" href="https://github.com/ricklon/xiaozhi-esp32/blob/main/docs/mqtt-udp.md" target="_blank" rel="noopener">
+      <strong>MQTT + UDP Protocol</strong>
+      <span>The alternate transport split: MQTT for control messages and UDP for real-time audio.</span>
+    </a>
+  </div>
+
+  <h3 id="mcp-clients"><a href="#mcp-clients">Client connection examples</a></h3>
+
+  <div class="callout info">
+    <span class="icon">ℹ</span>
+    <span>
+      Claude, Codex, Gemini CLI, VS Code, Cursor, and most desktop MCP hosts do not talk directly
+      to the ESP32's XiaoZhi WebSocket or MQTT framing. Put a small <strong>MCP bridge</strong>
+      between them: the bridge exposes standard MCP over stdio or Streamable HTTP, then forwards
+      <code>initialize</code>, <code>tools/list</code>, and <code>tools/call</code> to the XiaoZhi
+      server/device transport.
+    </span>
+  </div>
+
+  <p>A typical connection looks like this:</p>
+  <pre><code>Claude / Codex / Gemini CLI / MCP host
+  -> standard MCP stdio or HTTP
+  -> xiaozhi-mcp-bridge
+  -> XiaoZhi backend WebSocket or MQTT
+  -> ESP32 MCP tools</code></pre>
+
+  <p>
+    The bridge can be local on your laptop for demos, or a small HTTP service on the same network
+    as the devices. Keep privileged tools behind explicit confirmation or a tool allowlist.
+  </p>
+
+  <h3>Example bridge command shape</h3>
+  <pre><code><span class="c"># Example only: replace this with your actual bridge implementation.</span>
+uv run python /path/to/xiaozhi-mcp-bridge.py \
+  --xiaozhi-server http://192.168.1.20:8003 \
+  --device living-room-s3</code></pre>
+
+  <h3>Claude Code</h3>
+  <p>
+    Claude Code supports local stdio MCP servers and remote HTTP MCP servers.
+    Official reference: <a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Claude Code MCP docs</a>.
+  </p>
+  <pre><code><span class="c"># Local stdio bridge.</span>
+claude mcp add --transport stdio xiaozhi -- \
+  uv run python /path/to/xiaozhi-mcp-bridge.py \
+    --xiaozhi-server http://192.168.1.20:8003 \
+    --device living-room-s3
+
+<span class="c"># Remote HTTP bridge.</span>
+claude mcp add --transport http xiaozhi http://192.168.1.20:8787/mcp
+
+<span class="c"># In Claude Code, inspect connection and tools.</span>
+/mcp</code></pre>
+
+  <h3>Claude Desktop</h3>
+  <p>
+    For Claude Desktop, package a local bridge as a desktop extension or add a remote bridge through
+    Settings &rarr; Connectors. Official references:
+    <a href="https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop" target="_blank" rel="noopener">local MCP servers</a>
+    and
+    <a href="https://support.claude.com/en/articles/11503834-build-custom-connectors-via-remote-mcp-servers" target="_blank" rel="noopener">remote MCP connectors</a>.
+  </p>
+  <pre><code><span class="c"># Local option: package the bridge as an .mcpb desktop extension.</span>
+mcpb pack /path/to/xiaozhi-mcp-bridge-extension
+
+<span class="c"># Remote option: expose the bridge over Streamable HTTP.</span>
+https://your-lan-or-cloud-host.example/mcp</code></pre>
+
+  <h3>Codex</h3>
+  <p>
+    Codex supports MCP servers in the CLI and IDE extension, with configuration in
+    <code>~/.codex/config.toml</code> or trusted project <code>.codex/config.toml</code>.
+    Official reference: <a href="https://developers.openai.com/codex/mcp" target="_blank" rel="noopener">Codex MCP docs</a>.
+  </p>
+  <pre><code><span class="c"># CLI add, local stdio bridge.</span>
+codex mcp add xiaozhi -- \
+  uv run python /path/to/xiaozhi-mcp-bridge.py \
+    --xiaozhi-server http://192.168.1.20:8003 \
+    --device living-room-s3
+
+<span class="c"># Or edit config.toml for a local bridge.</span>
+[mcp_servers.xiaozhi]
+command = "uv"
+args = [
+  "run", "python", "/path/to/xiaozhi-mcp-bridge.py",
+  "--xiaozhi-server", "http://192.168.1.20:8003",
+  "--device", "living-room-s3"
+]
+default_tools_approval_mode = "prompt"
+
+<span class="c"># Or edit config.toml for a remote HTTP bridge.</span>
+[mcp_servers.xiaozhi-http]
+url = "http://192.168.1.20:8787/mcp"
+default_tools_approval_mode = "prompt"</code></pre>
+
+  <h3>Gemini CLI</h3>
+  <p>
+    Gemini CLI reads MCP servers from <code>settings.json</code> and supports stdio, SSE, and
+    Streamable HTTP transports. Official reference:
+    <a href="https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md" target="_blank" rel="noopener">Gemini CLI MCP server guide</a>.
+  </p>
+  <pre><code>{
+  "mcpServers": {
+    "xiaozhi": {
+      "command": "uv",
+      "args": [
+        "run", "python", "/path/to/xiaozhi-mcp-bridge.py",
+        "--xiaozhi-server", "http://192.168.1.20:8003",
+        "--device", "living-room-s3"
+      ],
+      "timeout": 30000,
+      "trust": false
+    },
+    "xiaozhi-http": {
+      "httpUrl": "http://192.168.1.20:8787/mcp",
+      "timeout": 30000,
+      "trust": false
+    }
+  }
+}</code></pre>
+
+  <h3>Other MCP hosts and devices</h3>
+  <p>
+    Any MCP host that accepts a command, stdio server, or Streamable HTTP URL can use the same
+    bridge pattern. VS Code, Cursor, Zed, custom Python/TypeScript agents, home automation hubs,
+    and other MCP-aware tools should point at the bridge, not directly at the ESP32. The bridge is
+    where you decide which device tools are visible, which are user-only, and which require manual
+    approval.
+  </p>
 
   <!-- ═══════════════════════════════════════════════ SERVER -->
   <h2 id="server"><a href="#server">Running Your Own Server</a></h2>

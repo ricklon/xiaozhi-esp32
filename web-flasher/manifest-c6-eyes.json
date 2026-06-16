@@ -1,0 +1,16 @@
+{
+  "name": "XiaoZhi — XIAO ESP32-C6 Eyes",
+  "version": "1.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C6",
+      "parts": [
+        { "path": "firmware/c6-eyes/bootloader.bin",      "offset": 0 },
+        { "path": "firmware/c6-eyes/partition-table.bin", "offset": 32768 },
+        { "path": "firmware/c6-eyes/ota_data_initial.bin","offset": 53248 },
+        { "path": "firmware/c6-eyes/xiaozhi.bin",          "offset": 131072 }
+      ]
+    }
+  ]
+}

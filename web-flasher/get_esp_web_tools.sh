@@ -15,24 +15,32 @@ echo "Downloading esp-web-tools entry point..."
 curl -fsSL "$BASE/$ENTRY_REMOTE?module" -o "$VENDOR/$ENTRY_LOCAL"
 
 echo "Scanning for dynamic chunk imports..."
-CHUNKS=$(grep -oP "(?<=['\"])\./[^'\"?]+(?=[?'\"])" "$VENDOR/$ENTRY_LOCAL" || true)
+queue=("$ENTRY_LOCAL")
+seen=""
 
-for chunk in $CHUNKS; do
-  name="${chunk#./}"
-  name="${name%%\?*}"
-  if [ ! -f "$VENDOR/$name" ]; then
-    echo "  downloading $name..."
-    curl -fsSL "$BASE/$name?module" -o "$VENDOR/$name"
-    SUB=$(grep -oP "(?<=['\"])\./[^'\"?]+(?=[?'\"])" "$VENDOR/$name" || true)
-    for sub in $SUB; do
-      sname="${sub#./}"
-      sname="${sname%%\?*}"
-      if [ ! -f "$VENDOR/$sname" ]; then
-        echo "    downloading sub-chunk $sname..."
-        curl -fsSL "$BASE/$sname?module" -o "$VENDOR/$sname" || true
-      fi
-    done
+while [ "${#queue[@]}" -gt 0 ]; do
+  current="${queue[0]}"
+  queue=("${queue[@]:1}")
+
+  if [[ "$seen" == *"|$current|"* ]]; then
+    continue
   fi
+  seen="$seen|$current|"
+
+  while IFS= read -r chunk; do
+    name="${chunk#./}"
+    name="${name%%\?*}"
+    if [ -z "$name" ]; then
+      continue
+    fi
+
+    if [ ! -f "$VENDOR/$name" ]; then
+      echo "  downloading $name..."
+      curl -fsSL "$BASE/$name?module" -o "$VENDOR/$name"
+    fi
+
+    queue+=("$name")
+  done < <(grep -oP "(?<=['\"])\./[^'\"?]+(?=[?'\"])" "$VENDOR/$current" || true)
 done
 
 # Remove stale install-button.js if it exists (was downloaded by an old version of this script)

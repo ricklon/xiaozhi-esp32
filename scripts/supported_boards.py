@@ -29,11 +29,27 @@ SUPPORTED_BOARDS = [
         "include_assets": False,
     },
     {
+        "board": "xiao-esp32-c6-eyes",
+        "name": "xiao-esp32-c6-eyes",
+        "full_name": "xiao-esp32-c6-eyes",
+        "flasher_board_id": "c6-eyes",
+        "manifest": "manifest-c6-eyes.json",
+        "include_assets": False,
+    },
+    {
         "board": "xiao-esp32-s3-sense",
         "name": "xiao-esp32-s3-sense",
         "full_name": "xiao-esp32-s3-sense",
         "flasher_board_id": "s3",
         "manifest": "manifest-s3.json",
+        "include_assets": True,
+    },
+    {
+        "board": "xiao-esp32-s3-eyes",
+        "name": "xiao-esp32-s3-eyes",
+        "full_name": "xiao-esp32-s3-eyes",
+        "flasher_board_id": "s3-eyes",
+        "manifest": "manifest-s3-eyes.json",
         "include_assets": True,
     },
     {

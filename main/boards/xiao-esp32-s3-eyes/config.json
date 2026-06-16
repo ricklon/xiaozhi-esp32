@@ -1,0 +1,22 @@
+{
+    "manufacturer": "Seeed Studio",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "xiao-esp32-s3-eyes",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_XIAO_ESP32S3_EYES=y",
+                "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/8m.csv\"",
+                "CONFIG_LANGUAGE_EN_US=y",
+                "CONFIG_OTA_URL=\"http://<your-ota-server>/xiaozhi/ota/\"",
+                "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
+                "CONFIG_CAMERA_OV2640=y",
+                "CONFIG_CAMERA_OV2640_AUTO_DETECT_DVP_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_OV2640_DVP_JPEG_320X240_50FPS=y",
+                "CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT=y",
+                "CONFIG_SPIRAM_MODE_OCT=y"
+            ]
+        }
+    ]
+}

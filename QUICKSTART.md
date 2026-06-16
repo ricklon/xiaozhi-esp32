@@ -1,5 +1,44 @@
 # XiaoZhi ESP32 - Quick Start Guide
 
+## Which Toolchain (and Who Installs It)
+
+| Use case | Toolchain | Who installs it |
+|----------|-----------|-----------------|
+| Released / web-flasher firmware | `espressif/idf:v5.5.2` Docker image | **GitHub Actions** — automatic (`.github/workflows/build.yml`, `release-firmware.yml`). Nothing to install locally. |
+| Local builds & flashing | ESP-IDF **v5.5.x** (min **5.4**) | **You**, once per machine (steps below). This bench uses **v5.5.4**. |
+
+You only need a local ESP-IDF install if you build/flash yourself. If you just want
+prebuilt firmware, use the [web flasher](README.md#firmware-flashing) — no toolchain required.
+
+### Install ESP-IDF + chip toolchains (first time, Linux)
+
+The supported XIAO boards span three chip targets, so install all three at once:
+
+| Target | Toolchain pulled | Boards |
+|--------|------------------|--------|
+| `esp32c3` | `riscv32-esp-elf` | xiao-esp32-c3 |
+| `esp32c6` | `riscv32-esp-elf` | xiao-esp32-c6, xiao-esp32-c6-eyes |
+| `esp32s3` | `xtensa-esp-elf` | xiao-esp32-s3-sense, xiao-esp32-s3-eyes |
+
+```bash
+# 1. System prerequisites (Ubuntu/Debian)
+sudo apt-get install -y git wget flex bison gperf python3 python3-venv python3-pip \
+  cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+
+# 2. Clone ESP-IDF (v5.5.x; min 5.4). CI uses v5.5.2; this bench uses v5.5.4 — either works.
+mkdir -p ~/esp && cd ~/esp
+git clone -b v5.5.4 --recursive https://github.com/espressif/esp-idf.git
+
+# 3. Install toolchains for every chip this project targets
+cd ~/esp/esp-idf
+./install.sh esp32c3,esp32c6,esp32s3
+
+# 4. Activate in each new shell (puts idf.py on PATH)
+. ~/esp/esp-idf/export.sh
+```
+
+After this, `./switch-board.sh <board> build` (preferred) or direct `idf.py` both work.
+
 ## Your Setup
 
 ✅ **ESP-IDF v5.5.4** installed  
@@ -27,31 +66,29 @@ ls /dev/ttyUSB*
 ### 2. Open Project in VS Code
 
 ```bash
-code ~/esp-projects/xiaozhi-esp32
+code ~/Projects/xiaozhi-esp32
 ```
 
-### 3. Configure for ESP32-S3
+### 3. Select Your Board
 
-**Option A: Use the switcher script**
+`switch-board.sh` sets the chip target automatically and keeps a per-board build
+directory (`build-<board>/`). Use the full board name — run `./switch-board.sh list`
+to see every board:
+
 ```bash
-./switch-board.sh s3
-```
-
-**Option B: Use VS Code Command Palette**
-- Press `Ctrl+Shift+P`
-- Type: "Run Task"
-- Select: "XiaoZhi: Set Target ESP32-S3"
-
-**Option C: Manual**
-```bash
-get_idf
-idf.py set-target esp32s3
+. ~/esp/esp-idf/export.sh        # source ESP-IDF (alias on this bench: get_idf)
+./switch-board.sh xiao-esp32-s3-sense build
 ```
 
 ### 4. Configure Wi-Fi Credentials
 
+Easiest: flash first, then use the `!wifi SSID PASSWORD` serial command (see the
+[serial console commands](README.md#firmware-flashing)).
+
+Or set it at build time via menuconfig, pointed at the board's build dir:
+
 ```bash
-idf.py menuconfig
+idf.py -B build-xiao-esp32-s3-sense menuconfig
 ```
 
 Navigate to:
@@ -65,17 +102,20 @@ XiaoZhi AI Chatbot Configuration
 ### 5. Build and Flash
 
 ```bash
-# Build only
-idf.py build
+# Build (auto-sets target, isolated build dir)
+./switch-board.sh xiao-esp32-s3-sense build
 
-# Build and flash
-idf.py build flash
+# Build if needed, then flash (default port /dev/ttyACM0)
+./switch-board.sh xiao-esp32-s3-sense flash
 
-# Build, flash, and monitor
-idf.py build flash monitor
+# Flash to an explicit port
+./switch-board.sh xiao-esp32-s3-sense flash /dev/ttyACM1
+```
 
-# Or use VS Code tasks:
-# Ctrl+Shift+P -> "Run Task" -> "XiaoZhi: Full Deploy"
+Monitoring needs a TTY, so it isn't wrapped by `switch-board.sh` — use `idf.py` directly:
+
+```bash
+idf.py -B build-xiao-esp32-s3-sense -p /dev/ttyACM0 monitor
 ```
 
 ## For ESP32-C3 (Budget Option)
@@ -83,23 +123,22 @@ idf.py build flash monitor
 If you want to use the **ESP32-C3** instead:
 
 ```bash
-./switch-board.sh c3
+./switch-board.sh xiao-esp32-c3 build
 ```
-
-Or in VS Code:
-- `Ctrl+Shift+P` → "Run Task" → "XiaoZhi: Set Target ESP32-C3"
 
 **Note:** C3 has less RAM, some features may be limited.
 
-## Available VS Code Tasks
+## Common Commands
 
-| Task | Command | Description |
-|------|---------|-------------|
-| Build | `Ctrl+Shift+B` | Compile the project |
-| Flash | Task: Flash | Upload to ESP32 |
-| Monitor | Task: Monitor | View serial output |
-| Full Deploy | Task: Full Deploy | Build + Flash + Monitor |
-| Menuconfig | Task: Menuconfig | SDK configuration |
+| Action | Command |
+|--------|---------|
+| List boards & build state | `./switch-board.sh list` |
+| Build | `./switch-board.sh <board> build` |
+| Flash | `./switch-board.sh <board> flash [port]` |
+| Monitor | `idf.py -B build-<board> -p /dev/ttyACM0 monitor` |
+| Config (menuconfig) | `idf.py -B build-<board> menuconfig` |
+| Show board config/state | `./switch-board.sh <board> status` |
+| Clean board build | `./switch-board.sh <board> clean` |
 
 ## Hardware Requirements
 
@@ -183,42 +222,44 @@ GND           --> GND
 
 ### Build Errors:
 ```bash
-# Clean and rebuild
-idf.py fullclean
-idf.py set-target esp32s3
-idf.py build
+# Clean this board's build dir and rebuild (target is re-set automatically)
+./switch-board.sh xiao-esp32-s3-sense clean
+./switch-board.sh xiao-esp32-s3-sense build
 ```
 
 ### Flash Errors:
 ```bash
 # Hold BOOT button while flashing
-# Or try lower baud rate
-idf.py -p /dev/ttyUSB0 -b 115200 flash
+# Or try a lower baud rate (XIAO boards usually enumerate as /dev/ttyACM0)
+idf.py -B build-xiao-esp32-s3-sense -p /dev/ttyACM0 -b 115200 flash
 ```
 
 ### Monitor Garbled Text:
 ```bash
 # Check baud rate (should be 115200)
-idf.py -p /dev/ttyUSB0 monitor
+idf.py -B build-xiao-esp32-s3-sense -p /dev/ttyACM0 monitor
 ```
 
 ## Switch Between Boards
 
 ```bash
-# Switch to S3
-./switch-board.sh s3
+# Build the S3 Sense board
+./switch-board.sh xiao-esp32-s3-sense build
 
-# Switch to C3
-./switch-board.sh c3
+# Build the C3 board
+./switch-board.sh xiao-esp32-c3 build
 
-# Check status
-./switch-board.sh status
+# Show a board's config and build state
+./switch-board.sh xiao-esp32-s3-sense status
+
+# List every board and its build state
+./switch-board.sh list
 ```
 
 ## Next Steps
 
 1. ✅ Connect ESP32-S3
-2. ✅ Run `./switch-board.sh s3`
+2. ✅ Run `./switch-board.sh xiao-esp32-s3-sense build`
 3. ✅ Configure Wi-Fi in menuconfig
 4. ✅ Build and flash
 5. ✅ Register on xiaozhi.me
