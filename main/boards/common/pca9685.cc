@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <esp_err.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -26,21 +27,41 @@ constexpr uint8_t kPreScale50Hz = 121;
 
 Pca9685::Pca9685(i2c_master_bus_handle_t i2c_bus, uint8_t addr)
     : I2cDevice(i2c_bus, addr) {
-    // The prescaler can only be programmed while the oscillator is asleep.
-    WriteReg(kRegMode1, kMode1Sleep);
-    WriteReg(kRegPreScale, kPreScale50Hz);
-    WriteReg(kRegMode1, kMode1AutoInc);
+    // The first write doubles as a presence probe: if the board is not wired or
+    // powered it NACKs, and we disable servo output rather than panic the whole
+    // device. The prescaler can only be programmed while the oscillator sleeps.
+    if (!TryWriteReg(kRegMode1, kMode1Sleep)) {
+        ESP_LOGW(TAG, "PCA9685 @0x%02X did not respond; servo control disabled "
+                      "(check wiring/power)", addr);
+        return;
+    }
+    TryWriteReg(kRegPreScale, kPreScale50Hz);
+    TryWriteReg(kRegMode1, kMode1AutoInc);
     vTaskDelay(pdMS_TO_TICKS(1));  // oscillator needs >= 500 us to stabilize
-    WriteReg(kRegMode1, kMode1AutoInc | kMode1Restart);
+    TryWriteReg(kRegMode1, kMode1AutoInc | kMode1Restart);
+    available_ = true;
     ESP_LOGI(TAG, "PCA9685 @0x%02X ready at 50 Hz", addr);
 }
 
+bool Pca9685::TryWriteReg(uint8_t reg, uint8_t value) {
+    uint8_t buffer[2] = {reg, value};
+    esp_err_t err = i2c_master_transmit(i2c_device_, buffer, 2, 100);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "I2C write to reg 0x%02X failed: %s", reg, esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
 void Pca9685::SetPwm(int channel, uint16_t on, uint16_t off) {
+    if (!available_) {
+        return;
+    }
     uint8_t base = kRegLed0OnL + 4 * channel;
-    WriteReg(base + 0, on & 0xFF);
-    WriteReg(base + 1, (on >> 8) & 0x0F);
-    WriteReg(base + 2, off & 0xFF);
-    WriteReg(base + 3, (off >> 8) & 0x0F);
+    TryWriteReg(base + 0, on & 0xFF);
+    TryWriteReg(base + 1, (on >> 8) & 0x0F);
+    TryWriteReg(base + 2, off & 0xFF);
+    TryWriteReg(base + 3, (off >> 8) & 0x0F);
 }
 
 void Pca9685::SetPulseUs(int channel, int pulse_us) {
