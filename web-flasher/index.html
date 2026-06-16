@@ -60,6 +60,14 @@
     }
     .board-card h3 { font-size: 0.9rem; color: #fff; margin-bottom: 0.25rem; }
     .board-card .specs { font-size: .7rem; color: #64748b; margin-bottom: 0.75rem; }
+    .board-card .wiring-guide {
+      display: block;
+      margin-top: .6rem;
+      font-size: .72rem;
+      color: #7dd3fc;
+      text-decoration: none;
+    }
+    .board-card .wiring-guide:hover { color: #bfdbfe; text-decoration: underline; }
 
     .flash-btn {
       width: 100%;
@@ -284,6 +292,7 @@
       <esp-web-install-button manifest="manifest-c6-eyes.json">
         <button slot="activate" class="flash-btn">Flash C6 Eyes</button>
       </esp-web-install-button>
+      <a class="wiring-guide" href="board-c6-eyes.html">Wiring &amp; pinout guide &#8594;</a>
     </div>
     <div class="board-card">
       <h3>XIAO ESP32-S3 Sense</h3>
