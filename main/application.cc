@@ -253,10 +253,25 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-        
+
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
+            }
+
+            // Watchdog: recover from a stale audio channel. If we believe we're
+            // in an active conversation but the channel has actually dropped
+            // (a server-side close we never observed, or the 120s receive
+            // timeout), OnAudioChannelClosed may never fire and the device gets
+            // wedged in Listening/Speaking — SendTextChat/StartListening then
+            // refuse to reconnect because the state isn't Idle. Force-close and
+            // return to Idle so the next interaction opens a fresh channel.
+            auto state = GetDeviceState();
+            if ((state == kDeviceStateListening || state == kDeviceStateSpeaking) &&
+                protocol_ != nullptr && !protocol_->IsAudioChannelOpened()) {
+                ESP_LOGW(TAG, "Audio channel lost while in active state, recovering to idle");
+                protocol_->CloseAudioChannel();
+                SetDeviceState(kDeviceStateIdle);
             }
         }
     }

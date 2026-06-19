@@ -145,8 +145,15 @@ Commands at runtime (via serial terminal at 115200 baud):
 | `!server IP` | Set OTA URL to `http://IP:8003/xiaozhi/ota/` |
 | `!server URL` | Set full OTA URL |
 | `!status` | Firmware version, IP, OTA URL, free heap |
+| `!camera` | Capture one camera frame (diagnostic) |
+| `!mic [gain N\|mute\|unmute\|status]` | Test/configure the microphone |
+| `!speaker [test\|vol 0-100\|status]` | Test the speaker — plays a built-in chime through the amp |
+| `!stop` | Stop listening / close the active session |
 | `!reboot` | Reboot device |
+| `!help` | List all commands |
 | Any other text | Sent to LLM via `SendTextChat()` |
+
+On boards whose console is routed to USB-Serial-JTAG (e.g. the C6 — `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`), `XiaoSerialInputTask` installs the USB-Serial-JTAG VFS driver on startup so `fgetc(stdin)` actually receives host bytes; without it the commands are silently dead. No-op on UART0 consoles.
 
 ---
 

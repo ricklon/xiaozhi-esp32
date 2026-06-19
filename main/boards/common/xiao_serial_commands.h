@@ -10,6 +10,7 @@
 #include "ssid_manager.h"
 #include "system_info.h"
 #include "wifi_manager.h"
+#include "assets/lang_config.h"
 #include "sdkconfig.h"
 
 #include <esp_app_desc.h>
@@ -58,7 +59,7 @@ static const char* TrimXiaoSerialLine(char* buf) {
     }
 
     const char* known_commands[] = {
-        "!reboot", "!status", "!camera", "!server", "!wifi", "!stop", "!help"
+        "!reboot", "!status", "!camera", "!server", "!wifi", "!mic", "!speaker", "!stop", "!help"
     };
     for (const char* command : known_commands) {
         char* command_start = strstr(start, command);
@@ -248,6 +249,36 @@ static void HandleXiaoSerialLine(const char* buf) {
         return;
     }
 
+    // --- !speaker ---
+    if (strncmp(buf, "!speaker", 8) == 0 && (buf[8] == ' ' || buf[8] == '\0')) {
+        const char* args = buf[8] == ' ' ? buf + 9 : "";
+        auto& app = Application::GetInstance();
+        auto codec = Board::GetInstance().GetAudioCodec();
+
+        if (strncmp(args, "vol ", 4) == 0) {
+            int vol = atoi(args + 4);
+            if (vol < 0) vol = 0;
+            if (vol > 100) vol = 100;
+            codec->SetOutputVolume(vol);
+            printf("Speaker volume set to %d\r\n", vol);
+        } else if (strcmp(args, "status") == 0) {
+            printf("Speaker status:\r\n");
+            printf("  Volume : %d\r\n", codec->output_volume());
+            printf("  Output : %s\r\n", codec->output_enabled() ? "enabled" : "disabled");
+        } else if (strcmp(args, "") == 0 || strcmp(args, "test") == 0) {
+            // Plays a built-in OGG chime through the speaker. PlaySound enables
+            // the codec output on its own, so this works from any state without
+            // a server connection — exercising opus decode -> I2S -> amp -> speaker.
+            printf("Playing test sound at volume %d...\r\n", codec->output_volume());
+            fflush(stdout);
+            app.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        } else {
+            printf("Usage: !speaker [test|vol <0-100>|status]\r\n");
+        }
+        fflush(stdout);
+        return;
+    }
+
     // --- !help ---
     if (strcmp(buf, "!help") == 0) {
         printf("Commands:\r\n");
@@ -262,6 +293,9 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !mic [gain N]        -- set mic gain (float, e.g. 30.0)\r\n");
         printf("  !mic [mute|unmute]   -- mute/unmute microphone\r\n");
         printf("  !mic status          -- show mic gain and mute state\r\n");
+        printf("  !speaker             -- play a test sound through the speaker\r\n");
+        printf("  !speaker vol N       -- set speaker volume (0-100)\r\n");
+        printf("  !speaker status      -- show speaker volume and output state\r\n");
         printf("  !reboot              -- reboot the device\r\n");
         printf("  !stop                -- stop listening / close active listening\r\n");
         printf("  !help                -- show this message\r\n");
