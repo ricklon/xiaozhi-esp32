@@ -1040,6 +1040,7 @@ idf_component_register(SRCS ${SOURCES}
                         esp_driver_spi
                         esp_driver_i2c
                         esp_driver_i2s
+                        esp_driver_usb_serial_jtag
                         esp_driver_jpeg
                         esp_driver_ppa
                         esp_app_format

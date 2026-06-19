@@ -22,6 +22,12 @@
 #include <string.h>
 #include <ctype.h>
 
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+#include <fcntl.h>
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#endif
+
 static const char* GetXiaoSerialBoardName() {
 #if CONFIG_BOARD_TYPE_XIAO_ESP32C3
     return "XIAO ESP32-C3";
@@ -275,7 +281,30 @@ static void HandleXiaoSerialLine(const char* buf) {
     Application::GetInstance().SendTextChat(std::string(buf));
 }
 
+// On boards whose console is routed to the USB-Serial-JTAG peripheral, the
+// default IDF console only wires up non-blocking output. Reads via fgetc(stdin)
+// then always return EOF, so the interactive commands never see host input.
+// Install the USB-Serial-JTAG VFS driver (mirrors esp_console's setup) so stdin
+// delivers bytes. This is a no-op on UART0 consoles, which already work.
+static void XiaoSerialConsoleInit() {
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+    // Translate incoming CR to \n and outgoing \n to CRLF for terminal echo.
+    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+
+    // Make stdin/stdout blocking so fgetc waits for input instead of spinning.
+    fcntl(fileno(stdout), F_SETFL, 0);
+    fcntl(fileno(stdin), F_SETFL, 0);
+
+    usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    if (usb_serial_jtag_driver_install(&cfg) == ESP_OK) {
+        usb_serial_jtag_vfs_use_driver();
+    }
+#endif
+}
+
 static void XiaoSerialInputTask(void* arg) {
+    XiaoSerialConsoleInit();
     char buf[256];
     int pos = 0;
     while (true) {
