@@ -90,6 +90,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
+    // Start the timeout window now. Otherwise last_incoming_time_ stays at the
+    // steady_clock epoch and IsTimeout() fires instantly on any device whose
+    // uptime already exceeds kTimeoutSeconds, killing the session on arrival.
+    last_incoming_time_ = std::chrono::steady_clock::now();
 
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
