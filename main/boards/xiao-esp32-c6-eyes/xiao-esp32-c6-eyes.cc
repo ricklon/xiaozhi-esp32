@@ -37,6 +37,24 @@ private:
         xTaskCreate(XiaoSerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
     }
 
+    void InitializeAutoConnect() {
+        xTaskCreate([](void*) {
+            auto& app = Application::GetInstance();
+            DeviceState last_state = kDeviceStateUnknown;
+            while (true) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                DeviceState state = app.GetDeviceState();
+                if (state == kDeviceStateIdle && last_state != kDeviceStateIdle) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    if (app.GetDeviceState() == kDeviceStateIdle) {
+                        app.ToggleChatState();
+                    }
+                }
+                last_state = state;
+            }
+        }, "auto_connect", 4096, nullptr, 3, nullptr);
+    }
+
     void InitializeServoI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = SERVO_I2C_PORT,
@@ -151,6 +169,7 @@ public:
         }
         InitializeButtons();
         InitializeSerialInput();
+        InitializeAutoConnect();
         InitializeServoI2c();
         InitializeEyeServos();
         InitializeTools();
