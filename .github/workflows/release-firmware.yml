@@ -57,6 +57,7 @@ jobs:
           path: |
             dist/release-zips/*.zip
             dist/firmware/${{ matrix.flasher_board_id }}
+            dist/manifests/${{ matrix.manifest }}
           if-no-files-found: error
 
   publish:

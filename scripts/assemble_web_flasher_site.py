@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--firmware-root", required=True, help="Directory containing firmware/<board-id>/ payloads")
     parser.add_argument("--output-root", required=True, help="Directory to assemble the publishable site into")
     parser.add_argument("--release-zips", help="Optional directory containing release zip files to publish alongside the site")
+    parser.add_argument("--manifest-root", help="Optional directory containing generated web-flasher manifests")
     args = parser.parse_args()
 
     firmware_root = Path(args.firmware_root).resolve()
@@ -45,6 +46,12 @@ def main() -> None:
         release_zips = Path(args.release_zips).resolve()
         if release_zips.exists():
             copy_tree(release_zips, output_root / "releases")
+
+    if args.manifest_root:
+        manifest_root = Path(args.manifest_root).resolve()
+        if manifest_root.exists():
+            for manifest in manifest_root.glob("manifest-*.json"):
+                shutil.copy2(manifest, output_root / manifest.name)
 
 
 if __name__ == "__main__":

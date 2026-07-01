@@ -17,6 +17,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEB_FLASHER_DIR = PROJECT_ROOT / "web-flasher"
 
 
+CHIP_FAMILIES = {
+    "esp32": "ESP32",
+    "esp32c3": "ESP32-C3",
+    "esp32c6": "ESP32-C6",
+    "esp32s3": "ESP32-S3",
+    "esp32p4": "ESP32-P4",
+}
+
+
 def get_project_version() -> str:
     cmake = (PROJECT_ROOT / "CMakeLists.txt").read_text(encoding="utf-8").splitlines()
     for line in cmake:
@@ -85,6 +94,60 @@ def copy_file(src: Path, dest: Path) -> None:
     shutil.copy2(src, dest)
 
 
+def firmware_filename_for_build_path(build_path: str) -> str:
+    filename = Path(build_path).name
+    if filename == "partition-table.bin":
+        return filename
+    return filename
+
+
+def write_manifest(entry: dict[str, object], build_dir: Path, output_root: Path) -> None:
+    flasher_args_path = build_dir / "flasher_args.json"
+    if not flasher_args_path.exists():
+        raise FileNotFoundError(flasher_args_path)
+
+    flasher_args = json.loads(flasher_args_path.read_text(encoding="utf-8"))
+    chip = flasher_args.get("extra_esptool_args", {}).get("chip")
+    chip_family = CHIP_FAMILIES.get(str(chip), str(chip).upper())
+    board_id = str(entry["flasher_board_id"])
+
+    parts = []
+    for offset, build_path in sorted(
+        flasher_args.get("flash_files", {}).items(),
+        key=lambda item: int(item[0], 16),
+    ):
+        filename = firmware_filename_for_build_path(str(build_path))
+        if filename == "partition-table.bin":
+            path = f"firmware/{board_id}/partition-table.bin"
+        else:
+            path = f"firmware/{board_id}/{filename}"
+
+        if not (output_root / path).exists():
+            continue
+
+        parts.append({
+            "path": path,
+            "offset": int(offset, 16),
+        })
+
+    manifest = {
+        "name": f"XiaoZhi - {entry['full_name']}",
+        "version": get_project_version(),
+        "new_install_prompt_erase": True,
+        "builds": [
+            {
+                "chipFamily": chip_family,
+                "parts": parts,
+            }
+        ],
+    }
+
+    manifest_dir = output_root / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = manifest_dir / str(entry["manifest"])
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
 def package_board(entry: dict[str, object], output_root: Path, do_build: bool) -> None:
     board = str(entry["board"])
     build_dir = ensure_built(board, do_build)
@@ -111,6 +174,7 @@ def package_board(entry: dict[str, object], output_root: Path, do_build: bool) -
         "project_version": get_project_version(),
     }
     (firmware_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    write_manifest(entry, build_dir, output_root)
 
     zip_dir = output_root / "release-zips"
     zip_dir.mkdir(parents=True, exist_ok=True)

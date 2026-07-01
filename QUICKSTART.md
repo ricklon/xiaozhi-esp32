@@ -10,6 +10,18 @@
 You only need a local ESP-IDF install if you build/flash yourself. If you just want
 prebuilt firmware, use the [web flasher](README.md#firmware-flashing) — no toolchain required.
 
+This fork is migrating the large upstream board catalog gradually. The release and
+web-flasher path currently targets:
+
+| Board | Build name | Web flasher ID |
+|-------|------------|----------------|
+| XIAO ESP32-C3 | `xiao-esp32-c3` | `c3` |
+| XIAO ESP32-C6 | `xiao-esp32-c6` | `c6` |
+| XIAO ESP32-C6 Eyes | `xiao-esp32-c6-eyes` | `c6-eyes` |
+| XIAO ESP32-S3 Sense | `xiao-esp32-s3-sense` | `s3` |
+| XIAO ESP32-S3 Eyes | `xiao-esp32-s3-eyes` | `s3-eyes` |
+| Waveshare ESP32-S3 Touch AMOLED 1.8 | `waveshare/esp32-s3-touch-amoled-1.8` | `waveshare-s3-amoled18` |
+
 ### Install ESP-IDF + chip toolchains (first time, Linux)
 
 The supported XIAO boards span three chip targets, so install all three at once:
@@ -55,6 +67,13 @@ The **ESP32-S3** is the **better choice** for XiaoZhi because:
 
 ## Quick Start
 
+### Services At A Glance
+
+- Device firmware streams voice audio to the selected backend and exposes MCP tools.
+- The OTA/backend URL defaults to xiaozhi.me and can be changed with `!server`.
+- The web flasher is a static site with firmware images and generated ESP Web Tools manifests.
+- The Web Serial console configures Wi-Fi, server URL, audio checks, camera checks, and reboot.
+
 ### 1. Connect Your ESP32-S3
 
 ```bash
@@ -84,6 +103,18 @@ to see every board:
 
 Easiest: flash first, then use the `!wifi SSID PASSWORD` serial command (see the
 [serial console commands](README.md#firmware-flashing)).
+
+Useful serial setup and diagnostics commands:
+
+```text
+!wifi SSID PASSWORD
+!server 192.168.1.25
+!status
+!speaker
+!mic status
+!camera
+!help
+```
 
 Or set it at build time via menuconfig, pointed at the board's build dir:
 

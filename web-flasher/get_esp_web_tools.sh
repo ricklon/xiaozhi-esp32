@@ -40,7 +40,11 @@ while [ "${#queue[@]}" -gt 0 ]; do
     fi
 
     queue+=("$name")
-  done < <(grep -oP "(?<=['\"])\./[^'\"?]+(?=[?'\"])" "$VENDOR/$current" || true)
+  done < <(python3 -c 'import re, sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+for match in re.findall(r"""['\''"](\./[^'\''"?]+)(?:\?module)?['\''"]""", text):
+    print(match)' "$VENDOR/$current")
 done
 
 # Remove stale install-button.js if it exists (was downloaded by an old version of this script)

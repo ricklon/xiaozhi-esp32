@@ -4,7 +4,7 @@
 
 ## Introduction
 
-This repository is an English-friendly ESP32 firmware fork focused on practical board bring-up, browser flashing, serial diagnostics, camera validation, and MCP-based device control.
+This repository is an English-friendly ESP32 firmware fork focused on practical board bring-up, browser flashing, serial diagnostics, camera validation, and MCP-based device control. It keeps the broad upstream board catalog available while we gradually migrate selected boards to this fork's release, web-flasher, serial-console, and MCP diagnostics configuration.
 
 XiaoZhi ESP32 turns small ESP32 boards into voice AI devices. It streams audio to a backend for ASR, LLM, and TTS, and exposes device capabilities through MCP tools so the backend or companion apps can control hardware features such as audio, display, camera, diagnostics, firmware updates, and board-specific actions.
 
@@ -19,20 +19,32 @@ This fork adds a supported-board workflow for event demos, local testing, and En
 - `uv`-managed web flasher serving for Python tooling, matching Astral `uv` conventions.
 - Web Serial console improvements that avoid toggling USB serial control signals, reducing unwanted ESP32 USB resets in Chrome.
 - Playwright regression coverage for the serial console connection flow.
-- Shared serial commands for supported boards: `!status`, `!server`, `!wifi`, `!camera`, `!reboot`, and `!help`.
+- Shared serial commands for supported boards: `!status`, `!server`, `!wifi`, `!camera`, `!mic`, `!speaker`, `!stop`, `!reboot`, and `!help`.
 - Camera diagnostics for the XIAO ESP32-S3 Sense, including a one-command capture check.
 - MCP capability metadata and user-only diagnostic tools so companion software can discover board capabilities and run lightweight checks.
-- Supported firmware packaging for XIAO ESP32-C3, XIAO ESP32-C6, XIAO ESP32-S3 Sense, and Waveshare ESP32-S3 Touch AMOLED 1.8.
+- Supported firmware packaging for XIAO ESP32-C3, XIAO ESP32-C6, XIAO ESP32-C6 Eyes, XIAO ESP32-S3 Sense, XIAO ESP32-S3 Eyes, and Waveshare ESP32-S3 Touch AMOLED 1.8.
+
+## Services In This Fork
+
+The firmware and tooling are split into a few services and surfaces:
+
+- **Device firmware** runs on the ESP32 board, streams Opus audio to a backend, receives TTS audio, exposes MCP tools, and provides local serial commands for setup and diagnostics.
+- **Backend / OTA service** is selected by `CONFIG_OTA_URL` or the serial `!server` command. The default is the official xiaozhi.me service; self-hosted deployments usually point at `http://SERVER:8003/xiaozhi/ota/`.
+- **Web flasher** is a static GitHub Pages site plus firmware binaries. It uses generated manifests from ESP-IDF `flasher_args.json`, so browser flashing follows the same offsets as `idf.py flash`.
+- **Web Serial console** runs in Chrome/Edge and sends setup/diagnostic commands over USB without requiring ESP-IDF locally.
+- **MCP device server** is built into the firmware. Backends and companion apps can list device tools and call model-facing or user-only diagnostic actions.
 
 ## Supported Boards In This Fork
 
-The upstream project supports many boards. This fork currently focuses release and web-flasher automation on:
+The upstream project supports many boards. This fork currently focuses release and web-flasher automation on the boards below. Other upstream boards remain in the tree, but many still need migration to this fork's current serial-command, MCP diagnostics, release packaging, and browser-flashing conventions.
 
 | Board | Board ID | Notes |
 |------|----------|-------|
 | Seeed XIAO ESP32-C3 | `c3` | Budget I2S audio target; wake word disabled due resource limits. |
 | Seeed XIAO ESP32-C6 | `c6` | XIAO form factor with corrected I2S GPIO mapping. |
+| Seeed XIAO ESP32-C6 Eyes | `c6-eyes` | C6 audio target with servo-eye MCP demo hardware. |
 | Seeed XIAO ESP32-S3 Sense | `s3` | OV2640 camera supported and verified with serial `!camera`. |
+| Seeed XIAO ESP32-S3 Eyes | `s3-eyes` | S3 Sense camera/audio target with servo-eye MCP demo hardware. |
 | Waveshare ESP32-S3 Touch AMOLED 1.8 | `waveshare-s3-amoled18` | AMOLED, touch, audio, wake word, Wi-Fi, and MCP screen/audio tools. |
 
 Use the board switcher for local builds:
@@ -146,7 +158,7 @@ Breadboard demo:
 
 ### Firmware Flashing
 
-For beginners, use the browser web flasher when prebuilt firmware is available. It avoids a local ESP-IDF setup and provides a Web Serial console for configuration and diagnostics.
+For beginners, use the browser web flasher when prebuilt firmware is available. It avoids a local ESP-IDF setup and provides a Web Serial console for configuration and diagnostics. The GitHub Pages flasher is assembled from release artifacts and includes vendored `esp-web-tools` assets so the published site is self-contained once loaded.
 
 Local web flasher development:
 
@@ -167,6 +179,14 @@ The serial console supports these commands:
 !wifi list           list saved Wi-Fi networks
 !wifi clear          remove saved Wi-Fi networks
 !camera              capture one camera frame when the board has a camera
+!mic status          show microphone gain and mute state
+!mic gain N          set microphone gain, for example !mic gain 30.0
+!mic mute            disable microphone input
+!mic unmute          enable microphone input
+!speaker             play a local test sound
+!speaker vol N       set speaker volume from 0 to 100
+!speaker status      show speaker volume and output state
+!stop                stop listening / stop active speech
 !reboot              reboot the device
 !help                show command help
 ```

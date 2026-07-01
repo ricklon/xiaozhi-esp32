@@ -1,9 +1,19 @@
 # Board Expansion Roadmap
 
 ## Current Status
-- **Working Boards**: 4 (xiao-esp32-c6, xiao-esp32-c3, xiao-esp32-s3-sense, waveshare)
+- **Release/web-flasher boards**: 6 (`xiao-esp32-c3`, `xiao-esp32-c6`, `xiao-esp32-c6-eyes`, `xiao-esp32-s3-sense`, `xiao-esp32-s3-eyes`, `waveshare/esp32-s3-touch-amoled-1.8`)
+- **Hardware-verified boards**: 4 (`xiao-esp32-c6`, `xiao-esp32-c3`, `xiao-esp32-s3-sense`, `waveshare/esp32-s3-touch-amoled-1.8`)
+- **Migration status**: upstream board code remains available, but each board needs review before it is considered release/web-flasher supported.
 - **Total Boards Available**: 104
-- **Boards to Test**: 100
+- **Boards to Test or Migrate**: 98
+
+Migration means:
+
+1. The board builds under the current ESP-IDF version.
+2. The board has a stable `switch-board.sh` name and optional web-flasher ID.
+3. Firmware packaging emits split binaries, release ZIPs, and a generated manifest from `flasher_args.json`.
+4. The board has the shared serial diagnostic commands when practical.
+5. MCP capability metadata and diagnostics accurately describe the hardware.
 
 ---
 
@@ -15,6 +25,7 @@ Based on your working boards, prioritize testing boards with the same chip type.
 **Priority**: HIGH - You have xiao-esp32-s3-sense working
 
 Recommended boards to test next:
+- [ ] xiao-esp32-s3-eyes - In release matrix; needs full hardware verification
 - [ ] lilygo-t-display-s3 - Popular dev board with display
 - [ ] m5stack-core-s3 - Well-documented hardware
 - [ ] esp-box-3 - Official Espressif dev kit
@@ -30,7 +41,10 @@ Recommended boards to test next:
 - [ ] xmini-c3 - Compact form factor
 
 ### ESP32-C6 Boards (1 available)
-**Priority**: LOW - Only xiao-esp32-c6 exists
+**Priority**: MEDIUM - xiao-esp32-c6 is working and xiao-esp32-c6-eyes is now in the release matrix
+
+Recommended boards to test next:
+- [ ] xiao-esp32-c6-eyes - Verify servo-eye MCP demo hardware
 
 ---
 
@@ -70,7 +84,9 @@ This recipe (wrapping `test-board.sh`) will:
 ### Future Enhancements
 - [ ] Auto-detect board hardware from config files
 - [ ] Batch test compilation for all boards
-- [ ] CI/CD pipeline for automated building
+- [x] CI/CD pipeline for automated supported-board firmware builds
+- [x] Browser flasher assembly from CI firmware artifacts
+- [x] Generated web-flasher manifests from ESP-IDF `flasher_args.json`
 - [ ] Hardware-in-the-loop testing with test jig
 
 ---

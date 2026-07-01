@@ -2,6 +2,12 @@
 
 Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 
+This fork keeps the upstream board tree available, but release automation and the
+browser flasher are intentionally limited to the boards that have been migrated
+to the current configuration. Migration means the board builds in CI, has a
+known web-flasher ID, uses generated ESP Web Tools manifests, and has the shared
+serial diagnostic command path where practical.
+
 ## Status Legend
 
 - ✅ **Tested & Working** - Fully functional
@@ -12,7 +18,7 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 
 ---
 
-## ESP32-S3 Boards (37)
+## ESP32-S3 Boards (38)
 
 | Board | Status | Last Tested | Working Features | Issues | Notes |
 |-------|--------|-------------|------------------|--------|-------|
@@ -52,7 +58,8 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 | taiji-pi-s3 | ❌ Not Supported | | | | |
 | waveshare/esp32-s3-cam | ⚠️ Untested | 2026-05-31 | Compiles (2.6M bin) | HW not verified | Second official camera board; shares common Esp32Camera path, inherits async-camera/MCP + %zu fixes; `just test` PASS |
 | waveshare/esp32-s3-rgb-matrix | ⚠️ Untested | 2026-05-28 | Compiles (2.6M bin) | HW not verified | New from upstream sync (HUB75); `just test` PASS |
-| xiao-esp32-s3-sense | ✅ Tested & Working | 2026-05 | WiFi, Audio, Display, Camera, Wake word | | User verified |
+| xiao-esp32-s3-eyes | 🚧 Work in Progress | 2026-07 | Builds for release/web flasher; camera/audio/servo-eye MCP target | HW verification pending | Migrated into supported firmware matrix as `s3-eyes` |
+| xiao-esp32-s3-sense | ✅ Tested & Working | 2026-05 | WiFi, Audio, Display, Camera, Wake word | | User verified; release/web-flasher ID `s3` |
 | yunliao-s3 | ❌ Not Supported | | | | |
 
 ## ESP32-C3 Boards (9)
@@ -64,18 +71,19 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 | magiclick-c3 | ❌ Not Supported | | | | |
 | magiclick-c3-v2 | ❌ Not Supported | | | | |
 | surfer-c3-1.14tft | 🔧 Needs Update | | | | |
-| xiao-esp32-c3 | ✅ Tested & Working | 2026-05 | WiFi, Audio, Wake word, OLED | | User verified |
+| xiao-esp32-c3 | ✅ Tested & Working | 2026-05 | WiFi, Audio, Wake word, OLED | | User verified; release/web-flasher ID `c3` |
 | xmini-c3 | ❌ Not Supported | | | | |
 | xmini-c3-4g | ❌ Not Supported | | | | |
 | xmini-c3-v3 | ❌ Not Supported | | | | |
 
-## ESP32-C6 Boards (3)
+## ESP32-C6 Boards (4)
 
 | Board | Status | Last Tested | Working Features | Issues | Notes |
 |-------|--------|-------------|------------------|--------|-------|
 | waveshare/esp32-c6-lcd-0.85 | ⚠️ Untested | 2026-05-28 | Compiles (2.0M bin) | HW not verified | New from upstream sync; `just test` PASS |
 | waveshare/esp32-c6-touch-lcd-1.54 | ⚠️ Untested | 2026-05-28 | Compiles (2.0M bin) | HW not verified | New from upstream sync; `just test` PASS |
-| xiao-esp32-c6 | ✅ Tested & Working | | | | |
+| xiao-esp32-c6 | ✅ Tested & Working | 2026-05 | WiFi, Audio | | Release/web-flasher ID `c6` |
+| xiao-esp32-c6-eyes | 🚧 Work in Progress | 2026-07 | Builds for release/web flasher; servo-eye MCP target | HW verification pending | Migrated into supported firmware matrix as `c6-eyes` |
 
 ## ESP32-P4 Boards (4)
 
@@ -137,7 +145,7 @@ Track testing, updates, and support status for XiaoZhi ESP32-compatible boards.
 | rymcu | ❌ Not Supported | | | | |
 | sensecap-watcher | ❌ Not Supported | | | | |
 | tudouzi | ❌ Not Supported | | | | |
-| waveshare | ✅ Tested & Working | 2026-05 | WiFi, Touch display, Audio | | User verified |
+| waveshare/esp32-s3-touch-amoled-1.8 | ✅ Tested & Working | 2026-05 | WiFi, Touch display, Audio | | User verified; release/web-flasher ID `waveshare-s3-amoled18` |
 | xingzhi-abs-2.0 | 🔧 Needs Update | | | | |
 | xingzhi-cube-0.85tft-ml307 | 🔧 Needs Update | | | | |
 | xingzhi-cube-0.85tft-wifi | 🔧 Needs Update | | | | |

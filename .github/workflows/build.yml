@@ -71,6 +71,7 @@ jobs:
           name: firmware_${{ matrix.flasher_board_id }}
           path: |
             dist/firmware/${{ matrix.flasher_board_id }}
+            dist/manifests/${{ matrix.manifest }}
             dist/release-zips/*.zip
           if-no-files-found: error
 
@@ -97,9 +98,11 @@ jobs:
 
       - name: Assemble web flasher site
         run: |
+          ./web-flasher/get_esp_web_tools.sh
           python3 scripts/assemble_web_flasher_site.py \
             --firmware-root dist/firmware \
             --release-zips dist/release-zips \
+            --manifest-root dist/manifests \
             --output-root site
 
       - name: Configure Pages
