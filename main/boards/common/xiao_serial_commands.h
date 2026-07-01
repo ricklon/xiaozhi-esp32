@@ -40,6 +40,8 @@ static const char* GetXiaoSerialBoardName() {
     return "XIAO ESP32-S3 Sense";
 #elif CONFIG_BOARD_TYPE_XIAO_ESP32S3_EYES
     return "XIAO ESP32-S3 Eyes";
+#elif CONFIG_BOARD_TYPE_ESP32_S3_WROOM2_AUDIO
+    return "ESP32-S3-DevKitC-1 (WROOM-2 Audio)";
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_AMOLED_1_8
     return "Waveshare ESP32-S3 Touch AMOLED 1.8";
 #else
