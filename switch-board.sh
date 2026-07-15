@@ -66,23 +66,24 @@ board_target() {
     python3 -c "import json; print(json.load(open('$cfg'))['target'])"
 }
 
-# Build a merged sdkconfig.defaults for this board and write it to the build dir.
+# Build a merged sdkconfig.defaults for this board and write it to $outfile.
 # Merge order (later entries win):
 #   1. sdkconfig.defaults           (project-wide base)
 #   2. sdkconfig.defaults.<target>  (target-level tweaks, if present)
 #   3. main/boards/<board>/sdkconfig.defaults  (board authority)
+#
+# The setup path writes this to a STABLE file inside the build dir (the stamp)
+# and passes that to -DSDKCONFIG_DEFAULTS, so CMake bakes a path that still
+# exists on later incremental builds. (A /tmp mktemp path gets cleaned out from
+# under us and breaks ninja's re-run of CMake.)
 merge_defaults() {
-    local board="$1" target="$2" bdir="$3"
-    # Write to /tmp so we don't pre-create the build dir (idf.py refuses to
-    # run set-target if the dir exists but isn't a valid CMake tree).
-    local merged
-    merged=$(mktemp "/tmp/sdkconfig_defaults_${board//\//-}_XXXXXX")
+    local board="$1" target="$2" outfile="$3"
+    mkdir -p "$(dirname "$outfile")"
     {
         [ -f "sdkconfig.defaults" ]                        && cat "sdkconfig.defaults"
         [ -f "sdkconfig.defaults.$target" ]                && cat "sdkconfig.defaults.$target"
         [ -f "$(board_dir "$board")/sdkconfig.defaults" ]  && cat "$(board_dir "$board")/sdkconfig.defaults"
-    } > "$merged"
-    echo "$merged"
+    } > "$outfile"
 }
 
 # ---------------------------------------------------------------------------
@@ -140,7 +141,7 @@ cmd_status() {
 
 cmd_setup() {
     local board="$1"
-    local bdir target merged current_target stamp
+    local bdir target current_target stamp abs_stamp
 
     bdir=$(build_dir "$board")
     stamp=$(defaults_stamp "$board")
@@ -157,16 +158,18 @@ cmd_setup() {
         fi
     fi
 
-    merged=$(merge_defaults "$board" "$target" "$bdir")
-    idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -DSDKCONFIG_DEFAULTS="$merged" set-target "$target"
-    mkdir -p "$bdir"
-    cp "$merged" "$stamp"
+    # Write the merged defaults to the stamp (a stable path inside the build
+    # dir) and hand CMake an absolute path to it, so ninja's later CMake
+    # re-runs can always find it.
+    merge_defaults "$board" "$target" "$stamp"
+    abs_stamp="$(cd "$(dirname "$stamp")" && pwd)/$(basename "$stamp")"
+    idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -DSDKCONFIG_DEFAULTS="$abs_stamp" set-target "$target"
     echo "Done — $bdir is ready."
 }
 
 cmd_build() {
     local board="$1"
-    local bdir target merged stamp
+    local bdir target stamp
     bdir=$(build_dir "$board")
     stamp=$(defaults_stamp "$board")
     target=$(board_target "$board")
@@ -174,11 +177,14 @@ cmd_build() {
     if [ ! -f "$bdir/CMakeCache.txt" ]; then
         cmd_setup "$board"
     else
-        merged=$(merge_defaults "$board" "$target" "$bdir")
-        if [ ! -f "$stamp" ] || ! cmp -s "$merged" "$stamp"; then
+        local probe
+        probe=$(mktemp)
+        merge_defaults "$board" "$target" "$probe"
+        if [ ! -f "$stamp" ] || ! cmp -s "$probe" "$stamp"; then
             echo "Board defaults changed for $board, re-running setup..."
             cmd_setup "$board"
         fi
+        rm -f "$probe"
     fi
 
     echo "Building $board..."
