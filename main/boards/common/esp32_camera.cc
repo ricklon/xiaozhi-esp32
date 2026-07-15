@@ -5,6 +5,7 @@
 #include <cstring>
 #include <esp_log.h>
 #include <img_converters.h>
+#include <memory>
 
 #include "esp32_camera.h"
 #include "board.h"
@@ -17,6 +18,39 @@
 #include "esp_timer.h"
 
 #define TAG "Esp32Camera"
+
+namespace {
+
+std::string UrlEncode(const std::string& value) {
+    static const char hex[] = "0123456789ABCDEF";
+    std::string encoded;
+    encoded.reserve(value.size());
+
+    for (unsigned char c : value) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+            c == '.' || c == '~') {
+            encoded.push_back(static_cast<char>(c));
+        } else {
+            encoded.push_back('%');
+            encoded.push_back(hex[c >> 4]);
+            encoded.push_back(hex[c & 0x0f]);
+        }
+    }
+
+    return encoded;
+}
+
+std::string AppendQueryParam(const std::string& url, const std::string& name, const std::string& value) {
+    std::string result = url;
+    result += (url.find('?') == std::string::npos) ? '?' : '&';
+    result += name;
+    result += '=';
+    result += UrlEncode(value);
+    return result;
+}
+
+} // namespace
 
 Esp32Camera::Esp32Camera(const camera_config_t &config) {
     esp_err_t err = esp_camera_init(&config);
@@ -166,9 +200,27 @@ std::string Esp32Camera::Explain(const std::string &question) {
         throw std::runtime_error("No camera frame captured");
     }
 
-    // If the sensor already produced a JPEG, stream it directly and skip the
-    // re-encode entirely (no encoder thread, no SPIRAM chunk queue).
+    const int captured_width = current_fb_->width;
+    const int captured_height = current_fb_->height;
+
+    // If the sensor already produced a JPEG, copy the right-sized payload and
+    // return the camera framebuffer before network I/O. This keeps the camera
+    // driver's large PSRAM allocation out of the upload/ACK wait path.
     const bool jpeg_native = (current_fb_->format == PIXFORMAT_JPEG);
+    std::unique_ptr<uint8_t, decltype(&heap_caps_free)> native_jpeg(nullptr, heap_caps_free);
+    size_t native_jpeg_len = 0;
+    if (jpeg_native) {
+        native_jpeg_len = current_fb_->len;
+        uint8_t* jpeg_copy = (uint8_t*)heap_caps_malloc(native_jpeg_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (jpeg_copy == nullptr) {
+            ESP_LOGE(TAG, "Failed to allocate %u bytes for JPEG upload copy", (unsigned)native_jpeg_len);
+            throw std::runtime_error("Failed to allocate JPEG upload buffer");
+        }
+        memcpy(jpeg_copy, current_fb_->buf, native_jpeg_len);
+        native_jpeg.reset(jpeg_copy);
+        esp_camera_fb_return(current_fb_);
+        current_fb_ = nullptr;
+    }
 
     // Create local JPEG queue (only needed when we have to encode)
     QueueHandle_t jpeg_queue = nullptr;
@@ -247,20 +299,21 @@ std::string Esp32Camera::Explain(const std::string &question) {
 
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(3);
-    // Bound the upload/result round trip. The default socket timeout is short
-    // enough to falsely report failure on a slow vision server; this gives the
-    // server time to respond while still failing cleanly if it hangs.
-    http->SetTimeout(60000);
+    // The agent-hub image endpoint now ACKs device uploads immediately and runs
+    // vision asynchronously. Keep this bounded to upload + ACK, not inference.
+    http->SetTimeout(10000);
     std::string boundary = "----ESP32_CAMERA_BOUNDARY";
 
-    http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+    const std::string device_id = SystemInfo::GetMacAddress();
+    const std::string upload_url = AppendQueryParam(explain_url_, "device_id", device_id);
+    http->SetHeader("Device-Id", device_id.c_str());
     http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
     if (!explain_token_.empty()) {
         http->SetHeader("Authorization", "Bearer " + explain_token_);
     }
     http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     http->SetHeader("Transfer-Encoding", "chunked");
-    if (!http->Open("POST", explain_url_)) {
+    if (!http->Open("POST", upload_url)) {
         ESP_LOGE(TAG, "Failed to connect to explain URL");
         if (!jpeg_native) {
             encoder_thread_.join();
@@ -296,9 +349,8 @@ std::string Esp32Camera::Explain(const std::string &question) {
 
     size_t total_sent = 0;
     if (jpeg_native) {
-        // Sensor frame is already JPEG: stream it straight from the frame buffer.
-        http->Write((const char *)current_fb_->buf, current_fb_->len);
-        total_sent = current_fb_->len;
+        http->Write((const char *)native_jpeg.get(), native_jpeg_len);
+        total_sent = native_jpeg_len;
     } else {
         bool saw_terminator = false;
         while (true) {
@@ -345,6 +397,6 @@ std::string Esp32Camera::Explain(const std::string &question) {
 
     size_t remain_stack_size = uxTaskGetStackHighWaterMark(nullptr);
     ESP_LOGI(TAG, "Explain image size=%dx%d, compressed size=%d, remain stack size=%d, question=%s\n%s",
-             current_fb_->width, current_fb_->height, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
+             captured_width, captured_height, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
     return result;
 }
