@@ -22,6 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <string>
+#include <vector>
 
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
 #include <fcntl.h>
@@ -80,6 +82,39 @@ static const char* TrimXiaoSerialLine(char* buf) {
     return start;
 }
 
+// --- recent-server history (newline-delimited, most-recent-first, deduped) ---
+static const int kXiaoServerHistoryMax = 5;
+
+static std::vector<std::string> XiaoServerHistoryLoad() {
+    Settings s("wifi", false);
+    std::string blob = s.GetString("srv_hist");
+    std::vector<std::string> out;
+    size_t pos = 0;
+    while (pos < blob.size()) {
+        size_t nl = blob.find('\n', pos);
+        std::string item = blob.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+        if (!item.empty()) out.push_back(item);
+        if (nl == std::string::npos) break;
+        pos = nl + 1;
+    }
+    return out;
+}
+
+// Record `url` as the most-recently-used server, removing any duplicate and
+// capping the list length.
+static void XiaoServerHistoryAdd(const std::string& url) {
+    std::vector<std::string> hist = XiaoServerHistoryLoad();
+    for (size_t i = 0; i < hist.size(); i++) {
+        if (hist[i] == url) { hist.erase(hist.begin() + i); break; }
+    }
+    hist.insert(hist.begin(), url);
+    if ((int)hist.size() > kXiaoServerHistoryMax) hist.resize(kXiaoServerHistoryMax);
+    std::string blob;
+    for (const auto& item : hist) { blob += item; blob += '\n'; }
+    Settings s("wifi", true);
+    s.SetString("srv_hist", blob);
+}
+
 static void HandleXiaoSerialLine(const char* buf) {
     auto& ssid_manager = SsidManager::GetInstance();
 
@@ -123,19 +158,89 @@ static void HandleXiaoSerialLine(const char* buf) {
     // --- !server ---
     if (strncmp(buf, "!server", 7) == 0 && (buf[7] == ' ' || buf[7] == '\0')) {
         const char* args = buf[7] == ' ' ? buf + 8 : "";
+        std::vector<std::string> hist = XiaoServerHistoryLoad();
         if (strlen(args) == 0) {
             Settings s("wifi", false);
             std::string stored = s.GetString("ota_url");
             printf("OTA URL: %s\r\n", stored.empty() ? CONFIG_OTA_URL : stored.c_str());
             printf("Usage: !server IP  or  !server http://IP:8003/xiaozhi/ota/\r\n");
-        } else {
-            std::string url(args);
-            // Accept bare IP — construct the full OTA URL automatically
-            if (url.find("http") != 0) {
-                url = "http://" + url + ":8003/xiaozhi/ota/";
+            printf("       !server list  -- recent servers   !server N  -- reuse #N\r\n");
+            fflush(stdout);
+            return;
+        }
+        if (strcmp(args, "list") == 0) {
+            printf("\r\n=== Recent Servers (%d) ===\r\n", (int)hist.size());
+            if (hist.empty()) {
+                printf("  (none yet)\r\n");
+            } else {
+                for (int i = 0; i < (int)hist.size(); i++) {
+                    printf("  [%d] %s\r\n", i + 1, hist[i].c_str());
+                }
             }
-            Settings s("wifi", true);
-            s.SetString("ota_url", url);
+            printf("===========================\r\n");
+            printf("Reuse one with: !server N\r\n\r\n");
+            fflush(stdout);
+            return;
+        }
+        {
+            std::string url(args);
+            // Numeric arg -> reuse recent server #N from `!server list`.
+            bool is_index = !url.empty();
+            for (char c : url) if (!isdigit((unsigned char)c)) { is_index = false; break; }
+            if (is_index) {
+                int idx = atoi(url.c_str());
+                if (idx < 1 || idx > (int)hist.size()) {
+                    printf("\r\nNo recent server #%d. Try: !server list\r\n\r\n", idx);
+                    fflush(stdout);
+                    return;
+                }
+                url = hist[idx - 1];  // already a full URL; skip host rewriting
+                goto server_commit;
+            }
+            // Bare host/IP (optionally host:port): update only the host, keeping
+            // the existing path (e.g. "/xiaozhi/ota/") intact instead of resetting
+            // it. A bare IP always means a local dev server, so use http and
+            // default to :8003 when neither the arg nor the current URL give a port.
+            if (url.find("http") != 0) {
+                Settings sr("wifi", false);
+                std::string base = sr.GetString("ota_url");
+                if (base.empty()) base = CONFIG_OTA_URL;
+
+                // Split the new arg into host and optional :port
+                std::string new_host = url;
+                std::string new_port;
+                size_t ac = url.find(':');
+                if (ac != std::string::npos) {
+                    new_host = url.substr(0, ac);
+                    new_port = url.substr(ac);  // includes leading ':'
+                }
+
+                // Locate the authority and path of the current URL
+                size_t scheme = base.find("://");
+                size_t astart = (scheme == std::string::npos) ? 0 : scheme + 3;
+                size_t aend = base.find('/', astart);
+                std::string authority = base.substr(astart,
+                    aend == std::string::npos ? std::string::npos : aend - astart);
+                std::string path = (aend == std::string::npos) ? "" : base.substr(aend);
+                // A bare "/" (or empty) path is not a usable OTA endpoint — fall
+                // back to the default so a truncated stored URL self-heals.
+                if (path.empty() || path == "/") path = "/xiaozhi/ota/";
+
+                // Preserve the current port; default to :8003 if none is set anywhere
+                std::string base_port;
+                size_t bc = authority.find(':');
+                if (bc != std::string::npos) base_port = authority.substr(bc);
+                std::string port = !new_port.empty() ? new_port
+                                 : !base_port.empty() ? base_port : ":8003";
+
+                url = "http://" + new_host + port + path;
+            }
+        server_commit:
+            {
+                Settings s("wifi", true);
+                s.SetString("ota_url", url);
+            }
+            XiaoServerHistoryAdd(url);
             printf("\r\n=== Server Configured ===\r\n");
             printf("URL: %s\r\n", url.c_str());
             printf("========================\r\n");
@@ -287,8 +392,10 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !wifi SSID PASSWORD  -- add a WiFi network\r\n");
         printf("  !wifi list           -- list saved networks\r\n");
         printf("  !wifi clear          -- remove all saved networks\r\n");
-        printf("  !server IP           -- set server IP and reboot\r\n");
+        printf("  !server IP           -- set server IP (keeps path) and reboot\r\n");
         printf("  !server URL          -- set full OTA URL and reboot\r\n");
+        printf("  !server list         -- show recent servers\r\n");
+        printf("  !server N            -- reuse recent server #N and reboot\r\n");
         printf("  !server              -- show current server URL\r\n");
         printf("  !status              -- show WiFi, IP, server, heap\r\n");
         printf("  !camera              -- capture one camera frame\r\n");
