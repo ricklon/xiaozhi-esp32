@@ -1,0 +1,14 @@
+CONFIG_BOARD_TYPE_ESP32_S3_WROOM_2=y
+
+# ESP32-S3-WROOM-2 (N32R8V): 32MB octal flash @ 1.8V + 8MB octal PSRAM.
+# Octal PSRAM is already enabled by sdkconfig.defaults.esp32s3; here we switch
+# the flash from the target-level QIO default to octal (OPI). OCT_FLASH auto-
+# selects OPI flash mode and DTR sampling.
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+CONFIG_ESPTOOLPY_OCT_FLASH=y
+CONFIG_ESPTOOLPY_FLASH_SAMPLE_MODE_DTR=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/v2/32m.csv"
+
+CONFIG_LANGUAGE_EN_US=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_OTA_URL="http://<your-ota-server>/xiaozhi/ota/"

@@ -1,0 +1,15 @@
+{
+    "manufacturer": "Espressif",
+    "target": "esp32s3",
+    "builds": [{
+        "name": "esp32-s3-wroom-2",
+        "sdkconfig_append": [
+            "CONFIG_BOARD_TYPE_ESP32_S3_WROOM_2=y",
+            "CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y",
+            "CONFIG_ESPTOOLPY_OCT_FLASH=y",
+            "CONFIG_ESPTOOLPY_FLASH_SAMPLE_MODE_DTR=y",
+            "CONFIG_LANGUAGE_EN_US=y",
+            "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y"
+        ]
+    }]
+}
