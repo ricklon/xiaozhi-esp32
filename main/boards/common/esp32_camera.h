@@ -31,6 +31,8 @@ private:
     uint8_t *encode_buf_ = nullptr;  // Buffer for JPEG encoding (with optional byte swap)
     size_t encode_buf_size_ = 0;
 
+    std::string Upload(const std::string& question, const char* purpose);
+
 public:
     Esp32Camera(const camera_config_t &config);
     ~Esp32Camera();
@@ -41,4 +43,5 @@ public:
     virtual bool SetVFlip(bool enabled) override;
     virtual bool SetSwapBytes(bool enabled) override;
     virtual std::string Explain(const std::string &question) override;
+    virtual std::string UploadTranscriptSnapshot() override;
 };

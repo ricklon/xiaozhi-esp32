@@ -214,6 +214,9 @@ std::string WebsocketProtocol::GetHelloMessage() {
     cJSON_AddBoolToObject(features, "aec", true);
 #endif
     cJSON_AddBoolToObject(features, "mcp", true);
+    if (transcription_only_) {
+        cJSON_AddBoolToObject(features, "transcription", true);
+    }
     cJSON_AddItemToObject(root, "features", features);
     cJSON_AddStringToObject(root, "transport", "websocket");
     cJSON* audio_params = cJSON_CreateObject();

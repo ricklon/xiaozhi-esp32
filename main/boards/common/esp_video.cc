@@ -56,6 +56,18 @@
 
 #define TAG "EspVideo"
 
+namespace {
+
+std::string AppendDeviceId(const std::string& url, const std::string& device_id) {
+    if (url.find("device_id=") != std::string::npos) {
+        return url;
+    }
+    return url + (url.find('?') == std::string::npos ? "?" : "&") +
+           "device_id=" + device_id;
+}
+
+}  // namespace
+
 #if defined(CONFIG_CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER) || defined(CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP)
 #warning \
     "CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER or CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP is enabled, which may cause image corruption in YUV422 format!"
@@ -265,6 +277,17 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
         sensor_format_ = 0;
         return;
     }
+
+    const uint32_t selected_format = setformat.fmt.pix.pixelformat;
+    ESP_LOGI(TAG, "Capture format %c%c%c%c %lux%lu, stride=%lu, size=%lu",
+             selected_format & 0xff,
+             (selected_format >> 8) & 0xff,
+             (selected_format >> 16) & 0xff,
+             (selected_format >> 24) & 0xff,
+             setformat.fmt.pix.width,
+             setformat.fmt.pix.height,
+             setformat.fmt.pix.bytesperline,
+             setformat.fmt.pix.sizeimage);
 
 #ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
     frame_.width = setformat.fmt.pix.height;
@@ -897,7 +920,7 @@ bool EspVideo::SetVFlip(bool enabled) {
  * @note 函数会等待之前的编码线程完成后再开始新的处理
  * @warning 如果摄像头缓冲区为空或网络连接失败，将返回错误信息
  */
-std::string EspVideo::Explain(const std::string& question) {
+std::string EspVideo::Upload(const std::string& question, const char* purpose) {
     if (explain_url_.empty()) {
         throw std::runtime_error("Image explain URL or token is not set");
     }
@@ -954,7 +977,8 @@ std::string EspVideo::Explain(const std::string& question) {
     }
     http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     http->SetHeader("Transfer-Encoding", "chunked");
-    if (!http->Open("POST", explain_url_)) {
+    const std::string upload_url = AppendDeviceId(explain_url_, SystemInfo::GetMacAddress());
+    if (!http->Open("POST", upload_url)) {
         ESP_LOGE(TAG, "Failed to connect to explain URL");
         // Clear the queue
         encoder_thread_.join();
@@ -978,6 +1002,15 @@ std::string EspVideo::Explain(const std::string& question) {
         question_field += "\r\n";
         question_field += question + "\r\n";
         http->Write(question_field.c_str(), question_field.size());
+    }
+    if (purpose != nullptr && purpose[0] != '\0') {
+        std::string purpose_field;
+        purpose_field += "--" + boundary + "\r\n";
+        purpose_field += "Content-Disposition: form-data; name=\"purpose\"\r\n";
+        purpose_field += "\r\n";
+        purpose_field += purpose;
+        purpose_field += "\r\n";
+        http->Write(purpose_field.c_str(), purpose_field.size());
     }
     {
         // 第二块：文件字段头部
@@ -1038,4 +1071,12 @@ std::string EspVideo::Explain(const std::string& question) {
     ESP_LOGI(TAG, "Explain image size=%d bytes, compressed size=%d, remain stack size=%d, question=%s\n%s",
              (int)frame_.len, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
     return result;
+}
+
+std::string EspVideo::Explain(const std::string& question) {
+    return Upload(question, nullptr);
+}
+
+std::string EspVideo::UploadTranscriptSnapshot() {
+    return Upload("Transcription snapshot", "transcript");
 }

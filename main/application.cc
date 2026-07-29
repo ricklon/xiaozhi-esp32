@@ -19,6 +19,37 @@
 
 #define TAG "Application"
 
+static std::string RedactEnrollmentToken(const std::string& url) {
+    std::string redacted = url;
+    const std::string key = "enrollment_token=";
+    size_t value_start = redacted.find(key);
+    if (value_start == std::string::npos) {
+        return redacted;
+    }
+    value_start += key.size();
+    size_t value_end = redacted.find('&', value_start);
+    redacted.replace(value_start,
+        value_end == std::string::npos ? std::string::npos : value_end - value_start,
+        "<redacted>");
+    return redacted;
+}
+
+static const char* HeartbeatActivity(const Application& app) {
+    if (app.IsListeningPaused()) {
+        return "paused";
+    }
+    switch (app.GetDeviceState()) {
+        case kDeviceStateListening:
+            return "listening";
+        case kDeviceStateSpeaking:
+            return "speaking";
+        case kDeviceStateConnecting:
+            return "thinking";
+        default:
+            return "idle";
+    }
+}
+
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -182,6 +213,7 @@ void Application::Run() {
         MAIN_EVENT_TOGGLE_CHAT |
         MAIN_EVENT_START_LISTENING |
         MAIN_EVENT_STOP_LISTENING |
+        MAIN_EVENT_TOGGLE_TRANSCRIPTION |
         MAIN_EVENT_ACTIVATION_DONE |
         MAIN_EVENT_STATE_CHANGED;
 
@@ -189,6 +221,11 @@ void Application::Run() {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
+            continuous_transcription_ = false;
+            transcription_stopping_ = false;
+            if (protocol_) {
+                protocol_->SetTranscriptionOnly(false);
+            }
             SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
         }
@@ -211,6 +248,10 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_TOGGLE_CHAT) {
             HandleToggleChatEvent();
+        }
+
+        if (bits & MAIN_EVENT_TOGGLE_TRANSCRIPTION) {
+            HandleToggleTranscriptionEvent();
         }
 
         if (bits & MAIN_EVENT_START_LISTENING) {
@@ -259,6 +300,15 @@ void Application::Run() {
                 SystemInfo::PrintHeapStats();
             }
 
+            Settings heartbeat("heartbeat", false);
+            int heartbeat_interval = heartbeat.GetInt("interval", 60);
+            if (heartbeat_interval < 15) {
+                heartbeat_interval = 15;
+            }
+            if (IsHeartbeatEnabled() && clock_ticks_ % heartbeat_interval == 0) {
+                StartHeartbeatTask();
+            }
+
             // Watchdog: recover from a stale audio channel. If we believe we're
             // in an active conversation but the channel has actually dropped
             // (a server-side close we never observed, or the 120s receive
@@ -303,6 +353,11 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+    continuous_transcription_ = false;
+    transcription_stopping_ = false;
+    if (protocol_) {
+        protocol_->SetTranscriptionOnly(false);
+    }
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateConnecting || state == kDeviceStateListening || state == kDeviceStateSpeaking) {
@@ -352,8 +407,91 @@ void Application::ActivationTask() {
     // Initialize the protocol
     InitializeProtocol();
 
+    // Agent Hub registration is not complete until the per-device credential
+    // has authenticated at least one health report. Keep retrying without user
+    // interaction; boards connected to servers that do not advertise heartbeat
+    // support retain the existing activation behavior.
+    while (IsHeartbeatEnabled() && !SendHeartbeat()) {
+        ESP_LOGW(TAG, "Registration heartbeat failed; retrying in 5 seconds");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+
     // Signal completion to main loop
     xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);
+}
+
+bool Application::IsHeartbeatEnabled() const {
+    Settings heartbeat("heartbeat", false);
+    return heartbeat.GetInt("enabled", 0) != 0 && !heartbeat.GetString("url").empty();
+}
+
+bool Application::SendHeartbeat() {
+    Settings heartbeat("heartbeat", false);
+    std::string url = heartbeat.GetString("url");
+    std::string token = heartbeat.GetString("token");
+    if (url.empty() || token.empty()) {
+        return false;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    if (root == nullptr) {
+        return false;
+    }
+    bool degraded = GetDeviceState() == kDeviceStateFatalError;
+    cJSON_AddStringToObject(root, "health", degraded ? "degraded" : "healthy");
+    cJSON_AddStringToObject(root, "activity", HeartbeatActivity(*this));
+    cJSON_AddNumberToObject(root, "uptime_seconds", esp_timer_get_time() / 1000000);
+    cJSON_AddNumberToObject(root, "free_heap", SystemInfo::GetFreeHeapSize());
+    cJSON_AddNumberToObject(root, "minimum_free_heap", SystemInfo::GetMinimumFreeHeapSize());
+    cJSON* mcp_tools = cJSON_AddArrayToObject(root, "mcp_tools");
+    for (const auto& name : McpServer::GetInstance().GetToolNames()) {
+        cJSON_AddItemToArray(mcp_tools, cJSON_CreateString(name.c_str()));
+    }
+    if (degraded) {
+        cJSON_AddStringToObject(root, "fault", "fatal device state");
+    }
+    char* encoded = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (encoded == nullptr) {
+        return false;
+    }
+    std::string body(encoded);
+    cJSON_free(encoded);
+
+    auto network = Board::GetInstance().GetNetwork();
+    auto http = network->CreateHttp(0);
+    if (http == nullptr) {
+        return false;
+    }
+    http->SetTimeout(10000);
+    http->SetHeader("Authorization", "Bearer " + token);
+    http->SetHeader("Device-Id", SystemInfo::GetMacAddress());
+    http->SetHeader("Content-Type", "application/json");
+    http->SetContent(std::move(body));
+    if (!http->Open("POST", url)) {
+        ESP_LOGW(TAG, "Unable to reach heartbeat endpoint, error=0x%x", http->GetLastError());
+        return false;
+    }
+    int status = http->GetStatusCode();
+    http->Close();
+    if (status != 200) {
+        ESP_LOGW(TAG, "Heartbeat rejected with HTTP %d", status);
+        return false;
+    }
+    ESP_LOGI(TAG, "Agent Hub heartbeat accepted");
+    return true;
+}
+
+void Application::StartHeartbeatTask() {
+    if (heartbeat_task_handle_ != nullptr) {
+        return;
+    }
+    xTaskCreate([](void* arg) {
+        auto* app = static_cast<Application*>(arg);
+        app->SendHeartbeat();
+        app->heartbeat_task_handle_ = nullptr;
+        vTaskDelete(nullptr);
+    }, "hub_heartbeat", 4096, this, 2, &heartbeat_task_handle_);
 }
 
 void Application::CheckAssetsVersion() {
@@ -432,8 +570,9 @@ void Application::CheckNewVersion() {
                 return;
             }
 
-            char error_message[128];
-            snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err, ota_->GetCheckVersionUrl().c_str());
+            char error_message[192];
+            std::string safe_url = RedactEnrollmentToken(ota_->GetCheckVersionUrl());
+            snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err, safe_url.c_str());
             char buffer[256];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, error_message);
             Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);
@@ -530,6 +669,8 @@ void Application::InitializeProtocol() {
     
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+        continuous_transcription_ = false;
+        transcription_stopping_ = false;
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -572,6 +713,20 @@ void Application::InitializeProtocol() {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
+                });
+            }
+        } else if (strcmp(type->valuestring, "transcription") == 0) {
+            auto state = cJSON_GetObjectItem(root, "state");
+            if (cJSON_IsString(state) && strcmp(state->valuestring, "stopped") == 0) {
+                Schedule([this]() {
+                    ESP_LOGI(TAG, "Continuous transcription stopped");
+                    continuous_transcription_ = false;
+                    transcription_stopping_ = false;
+                    if (protocol_) {
+                        protocol_->SetTranscriptionOnly(false);
+                        protocol_->CloseAudioChannel();
+                    }
+                    SetDeviceState(kDeviceStateIdle);
                 });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
@@ -682,12 +837,63 @@ void Application::ToggleChatState() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
 }
 
+void Application::ToggleContinuousTranscription() {
+    xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_TRANSCRIPTION);
+}
+
 void Application::StartListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
 }
 
 void Application::StopListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
+}
+
+void Application::SetListeningPaused(bool paused) {
+    if (listening_paused_.exchange(paused) == paused) {
+        return;
+    }
+
+    Schedule([this, paused]() {
+        auto display = Board::GetInstance().GetDisplay();
+        if (paused) {
+            continuous_transcription_ = false;
+            transcription_stopping_ = false;
+            if (protocol_) {
+                protocol_->SetTranscriptionOnly(false);
+            }
+            auto state = GetDeviceState();
+            if (state == kDeviceStateSpeaking) {
+                AbortSpeaking(kAbortReasonNone);
+            } else if (state == kDeviceStateListening && protocol_) {
+                protocol_->SendStopListening();
+            }
+
+            if (protocol_ && protocol_->IsAudioChannelOpened()) {
+                protocol_->CloseAudioChannel();
+            }
+            audio_service_.EnableVoiceProcessing(false);
+            audio_service_.EnableWakeWordDetection(false);
+
+            if (state == kDeviceStateConnecting || state == kDeviceStateListening ||
+                state == kDeviceStateSpeaking) {
+                SetDeviceState(kDeviceStateIdle);
+            } else {
+                display->SetStatus("Paused");
+            }
+            display->ShowNotification("Listening paused");
+        } else {
+            if (GetDeviceState() == kDeviceStateIdle) {
+                audio_service_.EnableWakeWordDetection(true);
+                display->SetStatus(Lang::Strings::STANDBY);
+            }
+            display->ShowNotification("Listening resumed");
+        }
+    });
+}
+
+void Application::ToggleListeningPaused() {
+    SetListeningPaused(!IsListeningPaused());
 }
 
 void Application::HandleToggleChatEvent() {
@@ -706,10 +912,17 @@ void Application::HandleToggleChatEvent() {
         return;
     }
 
+    if (IsListeningPaused()) {
+        Board::GetInstance().GetDisplay()->ShowNotification("Press A to resume listening");
+        return;
+    }
+
     if (!protocol_) {
         ESP_LOGE(TAG, "Protocol not initialized");
         return;
     }
+
+    protocol_->SetTranscriptionOnly(false);
 
     if (state == kDeviceStateIdle) {
         ListeningMode mode = GetDefaultListeningMode();
@@ -725,8 +938,59 @@ void Application::HandleToggleChatEvent() {
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateListening) {
-        protocol_->CloseAudioChannel();
+        protocol_->SendStopListening();
+        SetDeviceState(kDeviceStateIdle);
     }
+}
+
+void Application::HandleToggleTranscriptionEvent() {
+    auto state = GetDeviceState();
+    auto display = Board::GetInstance().GetDisplay();
+
+    if (IsListeningPaused()) {
+        display->ShowNotification("Press A to resume listening");
+        return;
+    }
+    if (!protocol_) {
+        ESP_LOGE(TAG, "Protocol not initialized");
+        return;
+    }
+
+    if (continuous_transcription_) {
+        if (transcription_stopping_) {
+            display->ShowNotification("Finishing transcript...");
+            return;
+        }
+        transcription_stopping_ = true;
+        display->SetStatus("Finishing transcript...");
+        audio_service_.EnableVoiceProcessing(false);
+        while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+            if (!protocol_->SendAudio(std::move(packet))) {
+                break;
+            }
+        }
+        protocol_->SendStopListening();
+        return;
+    }
+
+    if (state == kDeviceStateSpeaking) {
+        AbortSpeaking(kAbortReasonNone);
+        protocol_->CloseAudioChannel();
+        display->ShowNotification("Assistant stopped. Press B to transcribe.");
+        return;
+    }
+    if (state != kDeviceStateIdle) {
+        display->ShowNotification("Transcription is unavailable right now");
+        return;
+    }
+
+    continuous_transcription_ = true;
+    transcription_stopping_ = false;
+    protocol_->SetTranscriptionOnly(true);
+    SetDeviceState(kDeviceStateConnecting);
+    Schedule([this]() {
+        ContinueOpenAudioChannel(kListeningModeRealtime);
+    });
 }
 
 void Application::ContinueOpenAudioChannel(ListeningMode mode) {
@@ -741,6 +1005,12 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
+            if (continuous_transcription_) {
+                continuous_transcription_ = false;
+                transcription_stopping_ = false;
+                protocol_->SetTranscriptionOnly(false);
+                SetDeviceState(kDeviceStateIdle);
+            }
             return;
         }
     }
@@ -760,10 +1030,16 @@ void Application::HandleStartListeningEvent() {
         return;
     }
 
+    if (IsListeningPaused()) {
+        Board::GetInstance().GetDisplay()->ShowNotification("Press A to resume listening");
+        return;
+    }
+
     if (!protocol_) {
         ESP_LOGE(TAG, "Protocol not initialized");
         return;
     }
+    protocol_->SetTranscriptionOnly(false);
     
     if (state == kDeviceStateIdle) {
         if (!protocol_->IsAudioChannelOpened()) {
@@ -797,9 +1073,17 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+    if (IsListeningPaused()) {
+        audio_service_.EnableWakeWordDetection(false);
+        return;
+    }
     if (!protocol_) {
         return;
     }
+
+    continuous_transcription_ = false;
+    transcription_stopping_ = false;
+    protocol_->SetTranscriptionOnly(false);
 
     auto state = GetDeviceState();
     auto wake_word = audio_service_.GetLastWakeWord();
@@ -844,7 +1128,7 @@ void Application::HandleWakeWordDetectedEvent() {
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     // Check state again in case it was changed during scheduling
-    if (GetDeviceState() != kDeviceStateConnecting) {
+    if (GetDeviceState() != kDeviceStateConnecting || IsListeningPaused()) {
         return;
     }
 
@@ -888,11 +1172,17 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
-            display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
-            display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
+            if (IsListeningPaused()) {
+                display->SetStatus("Paused");
+                display->SetEmotion("sleepy");
+                audio_service_.EnableWakeWordDetection(false);
+            } else {
+                display->SetStatus(Lang::Strings::STANDBY);
+                display->SetEmotion("neutral"); // WeChat mode checks child count
+                audio_service_.EnableWakeWordDetection(true);
+            }
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -900,7 +1190,7 @@ void Application::HandleStateChangedEvent() {
             display->SetChatMessage("system", "");
             break;
         case kDeviceStateListening:
-            display->SetStatus(Lang::Strings::LISTENING);
+            display->SetStatus(continuous_transcription_ ? "Transcribing" : Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
 
             // Make sure the audio processor is running

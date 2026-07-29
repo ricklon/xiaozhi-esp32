@@ -191,7 +191,7 @@ bool Esp32Camera::SetSwapBytes(bool enabled) {
     return true;
 }
 
-std::string Esp32Camera::Explain(const std::string &question) {
+std::string Esp32Camera::Upload(const std::string &question, const char* purpose) {
     if (explain_url_.empty()) {
         throw std::runtime_error("Image explain URL or token is not set");
     }
@@ -338,6 +338,15 @@ std::string Esp32Camera::Explain(const std::string &question) {
         question_field += question + "\r\n";
         http->Write(question_field.c_str(), question_field.size());
     }
+    if (purpose != nullptr && purpose[0] != '\0') {
+        std::string purpose_field;
+        purpose_field += "--" + boundary + "\r\n";
+        purpose_field += "Content-Disposition: form-data; name=\"purpose\"\r\n";
+        purpose_field += "\r\n";
+        purpose_field += purpose;
+        purpose_field += "\r\n";
+        http->Write(purpose_field.c_str(), purpose_field.size());
+    }
     {
         std::string file_header;
         file_header += "--" + boundary + "\r\n";
@@ -399,4 +408,12 @@ std::string Esp32Camera::Explain(const std::string &question) {
     ESP_LOGI(TAG, "Explain image size=%dx%d, compressed size=%d, remain stack size=%d, question=%s\n%s",
              captured_width, captured_height, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
     return result;
+}
+
+std::string Esp32Camera::Explain(const std::string &question) {
+    return Upload(question, nullptr);
+}
+
+std::string Esp32Camera::UploadTranscriptSnapshot() {
+    return Upload("Transcription snapshot", "transcript");
 }

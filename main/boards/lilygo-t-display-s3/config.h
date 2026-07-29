@@ -22,7 +22,6 @@
 // Known Wi-Fi networks — seeded into NVS at boot.
 // Add networks here or use !wifi SSID PASSWORD over serial.
 #define WIFI_NETWORKS { \
-    {"732-50-FUBAR", "aquaman13"}, \
     {nullptr, nullptr} \
 }
 

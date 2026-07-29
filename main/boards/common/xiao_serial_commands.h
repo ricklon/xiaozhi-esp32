@@ -42,10 +42,12 @@ static const char* GetXiaoSerialBoardName() {
     return "XIAO ESP32-S3 Sense";
 #elif CONFIG_BOARD_TYPE_XIAO_ESP32S3_EYES
     return "XIAO ESP32-S3 Eyes";
-#elif CONFIG_BOARD_TYPE_ESP32_S3_WROOM2_AUDIO
-    return "ESP32-S3-DevKitC-1 (WROOM-2 Audio)";
+#elif CONFIG_BOARD_TYPE_ESP32_S3_WROOM_2
+    return "ESP32-S3-WROOM-2";
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_AMOLED_1_8
     return "Waveshare ESP32-S3 Touch AMOLED 1.8";
+#elif CONFIG_BOARD_TYPE_DF_K10
+    return "DFRobot UNIHIKER K10";
 #else
     return "unknown";
 #endif
@@ -84,6 +86,21 @@ static const char* TrimXiaoSerialLine(char* buf) {
 
 // --- recent-server history (newline-delimited, most-recent-first, deduped) ---
 static const int kXiaoServerHistoryMax = 5;
+
+static std::string XiaoRedactServerUrl(const std::string& url) {
+    std::string redacted = url;
+    const std::string key = "enrollment_token=";
+    size_t value_start = redacted.find(key);
+    if (value_start == std::string::npos) {
+        return redacted;
+    }
+    value_start += key.size();
+    size_t value_end = redacted.find('&', value_start);
+    redacted.replace(value_start,
+        value_end == std::string::npos ? std::string::npos : value_end - value_start,
+        "<redacted>");
+    return redacted;
+}
 
 static std::vector<std::string> XiaoServerHistoryLoad() {
     Settings s("wifi", false);
@@ -162,7 +179,8 @@ static void HandleXiaoSerialLine(const char* buf) {
         if (strlen(args) == 0) {
             Settings s("wifi", false);
             std::string stored = s.GetString("ota_url");
-            printf("OTA URL: %s\r\n", stored.empty() ? CONFIG_OTA_URL : stored.c_str());
+            std::string displayed_url = XiaoRedactServerUrl(stored.empty() ? CONFIG_OTA_URL : stored);
+            printf("OTA URL: %s\r\n", displayed_url.c_str());
             printf("Usage: !server IP  or  !server http://IP:8003/xiaozhi/ota/\r\n");
             printf("       !server list  -- recent servers   !server N  -- reuse #N\r\n");
             fflush(stdout);
@@ -174,7 +192,8 @@ static void HandleXiaoSerialLine(const char* buf) {
                 printf("  (none yet)\r\n");
             } else {
                 for (int i = 0; i < (int)hist.size(); i++) {
-                    printf("  [%d] %s\r\n", i + 1, hist[i].c_str());
+                    std::string displayed_url = XiaoRedactServerUrl(hist[i]);
+                    printf("  [%d] %s\r\n", i + 1, displayed_url.c_str());
                 }
             }
             printf("===========================\r\n");
@@ -242,7 +261,8 @@ static void HandleXiaoSerialLine(const char* buf) {
             }
             XiaoServerHistoryAdd(url);
             printf("\r\n=== Server Configured ===\r\n");
-            printf("URL: %s\r\n", url.c_str());
+            std::string displayed_url = XiaoRedactServerUrl(url);
+            printf("URL: %s\r\n", displayed_url.c_str());
             printf("========================\r\n");
             printf("Rebooting in 1 second...\r\n\r\n");
             fflush(stdout);
@@ -266,7 +286,8 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("WiFi SSID: %s\r\n", wifi.GetSsid().c_str());
         printf("IP Address: %s\r\n", wifi.GetIpAddress().c_str());
         printf("-----------------------------------\r\n");
-        printf("OTA URL  : %s\r\n", ota_url.c_str());
+        std::string displayed_url = XiaoRedactServerUrl(ota_url);
+        printf("OTA URL  : %s\r\n", displayed_url.c_str());
         printf("-----------------------------------\r\n");
         printf("Free heap: %lu bytes\r\n", (unsigned long)esp_get_free_heap_size());
         printf("Camera   : %s\r\n", Board::GetInstance().GetCamera() ? "available" : "not available");
