@@ -4,12 +4,14 @@
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 static const char TAG[] = "K10AudioCodec";
 
 K10AudioCodec::K10AudioCodec(void* i2c_master_handle, int input_sample_rate, int output_sample_rate,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
-    gpio_num_t pa_pin, uint8_t es8311_addr, uint8_t es7210_addr, bool input_reference) {
+    uint8_t es7243e_addr, bool input_reference) {
     duplex_ = true; // 是否双工
     input_reference_ = input_reference; // 是否使用参考输入，实现回声消除
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
@@ -22,23 +24,25 @@ K10AudioCodec::K10AudioCodec(void* i2c_master_handle, int input_sample_rate, int
     audio_codec_i2s_cfg_t i2s_cfg = {
         .port = I2S_NUM_0,
         .rx_handle = rx_handle_,
-        .tx_handle = tx_handle_,
+        .tx_handle = nullptr,
     };
     data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
     assert(data_if_ != NULL);
 
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = I2C_NUM_1,
-        .addr = es7210_addr,
+        // esp_codec_dev expects the 8-bit wire address and shifts it to the
+        // IDF driver's 7-bit address internally.
+        .addr = static_cast<uint8_t>(es7243e_addr << 1),
         .bus_handle = i2c_master_handle,
     };
-    const audio_codec_ctrl_if_t *in_ctrl_if_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    in_ctrl_if_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
     assert(in_ctrl_if_ != NULL);
 
     es7243e_codec_cfg_t es7243e_cfg = {
         .ctrl_if = in_ctrl_if_,
     };
-    const audio_codec_if_t *in_codec_if_ = es7243e_codec_new(&es7243e_cfg);
+    in_codec_if_ = es7243e_codec_new(&es7243e_cfg);
     assert(in_codec_if_ != NULL);
 
     esp_codec_dev_cfg_t codec_es7243e_dev_cfg = {
@@ -54,24 +58,30 @@ K10AudioCodec::K10AudioCodec(void* i2c_master_handle, int input_sample_rate, int
 }
 
 K10AudioCodec::~K10AudioCodec() {
-    ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
-    esp_codec_dev_delete(output_dev_);
-    ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
-    esp_codec_dev_delete(input_dev_);
-
-    audio_codec_delete_codec_if(in_codec_if_);
-    audio_codec_delete_ctrl_if(in_ctrl_if_);
-    audio_codec_delete_codec_if(out_codec_if_);
-    audio_codec_delete_ctrl_if(out_ctrl_if_);
-    audio_codec_delete_gpio_if(gpio_if_);
-    audio_codec_delete_data_if(data_if_);
+    if (input_dev_ != nullptr) {
+        if (input_enabled_) {
+            ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
+        }
+        esp_codec_dev_delete(input_dev_);
+    }
+    if (in_codec_if_ != nullptr) {
+        audio_codec_delete_codec_if(in_codec_if_);
+    }
+    if (in_ctrl_if_ != nullptr) {
+        audio_codec_delete_ctrl_if(in_ctrl_if_);
+    }
+    if (data_if_ != nullptr) {
+        audio_codec_delete_data_if(data_if_);
+    }
 }
 
 void K10AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din) {
     assert(input_sample_rate_ == output_sample_rate_);
 
-    i2s_chan_config_t chan_cfg = {
-        .id = I2S_NUM_0,
+    // The NS4168 speaker path is clock master on I2S1.  The ES7243E input is
+    // a separate I2S0 slave sharing BCLK/WS and receiving the required MCLK.
+    i2s_chan_config_t tx_chan_cfg = {
+        .id = I2S_NUM_1,
         .role = I2S_ROLE_MASTER,
         .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
         .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
@@ -79,7 +89,12 @@ void K10AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
         .auto_clear_before_cb = false,
         .intr_priority = 0,
     };
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
+    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_handle_, nullptr));
+
+    i2s_chan_config_t rx_chan_cfg = tx_chan_cfg;
+    rx_chan_cfg.id = I2S_NUM_0;
+    rx_chan_cfg.role = I2S_ROLE_SLAVE;
+    ESP_ERROR_CHECK(i2s_new_channel(&rx_chan_cfg, nullptr, &rx_handle_));
 
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
@@ -89,11 +104,11 @@ void K10AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
             .mclk_multiple = I2S_MCLK_MULTIPLE_256
         },
         .slot_cfg = {
-            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
             .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
             .slot_mode = I2S_SLOT_MODE_MONO,
-            .slot_mask = I2S_STD_SLOT_BOTH,
-            .ws_width = I2S_DATA_BIT_WIDTH_16BIT,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
             .left_align = true,
@@ -101,7 +116,7 @@ void K10AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
             .bit_order_lsb = false
         },
         .gpio_cfg = {
-            // .mclk = mclk,
+            .mclk = I2S_GPIO_UNUSED,
             .bclk = bclk,
             .ws = ws,
             .dout = dout,
@@ -152,8 +167,8 @@ void K10AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
 
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_init_tdm_mode(rx_handle_, &tdm_cfg));
-    ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+    ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
     ESP_LOGI(TAG, "Duplex channels created");
 }
 
@@ -201,26 +216,23 @@ int K10AudioCodec::Read(int16_t* dest, int samples) {
 
 int K10AudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_) {
-        std::vector<int32_t> buffer(samples * 2);  // Allocate buffer for 2x samples
+        std::vector<int32_t> buffer(samples);
 
         // Apply volume adjustment (same as before)
         int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
         for (int i = 0; i < samples; i++) {
             int64_t temp = int64_t(data[i]) * volume_factor;
             if (temp > INT32_MAX) {
-            buffer[i * 2] = INT32_MAX;
+                buffer[i] = INT32_MAX;
             } else if (temp < INT32_MIN) {
-            buffer[i * 2] = INT32_MIN;
+                buffer[i] = INT32_MIN;
             } else {
-            buffer[i * 2] = static_cast<int32_t>(temp);
+                buffer[i] = static_cast<int32_t>(temp);
             }
-
-            // Repeat each sample for slow playback (assuming mono audio)
-            buffer[i * 2 + 1] = buffer[i * 2];
         }
 
         size_t bytes_written;
-        ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * 2 * sizeof(int32_t), &bytes_written, portMAX_DELAY));
+        ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
         return bytes_written / sizeof(int32_t);
     }
     return samples;

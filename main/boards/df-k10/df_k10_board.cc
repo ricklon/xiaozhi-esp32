@@ -1,12 +1,14 @@
 #include "wifi_board.h"
 #include "k10_audio_codec.h"
 #include "display/lcd_display.h"
+#include "display/lvgl_display/lvgl_theme.h"
 #include "esp_lcd_ili9341.h"
 #include "led_control.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "esp_video.h"
+#include "xiao_serial_commands.h"
 
 #include "led/circular_strip.h"
 #include "assets/lang_config.h"
@@ -20,14 +22,69 @@
 
 #define TAG "DF-K10"
 
+class AgentHubDisplay : public SpiLcdDisplay {
+public:
+    AgentHubDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+                    int width, int height, int offset_x, int offset_y,
+                    bool mirror_x, bool mirror_y, bool swap_xy)
+        : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y,
+                        mirror_x, mirror_y, swap_xy) {
+    }
+
+    void SetupUI() override {
+        if (setup_ui_called_) {
+            return;
+        }
+        SpiLcdDisplay::SetupUI();
+
+        {
+            DisplayLockGuard lock(this);
+            auto theme = static_cast<LvglTheme*>(current_theme_);
+
+            auto footer = lv_obj_create(container_);
+            lv_obj_set_size(footer, LV_HOR_RES, 54);
+            lv_obj_set_style_radius(footer, 0, 0);
+            lv_obj_set_style_pad_all(footer, theme->spacing(2), 0);
+            lv_obj_set_style_border_width(footer, 1, 0);
+            lv_obj_set_style_border_side(footer, LV_BORDER_SIDE_TOP, 0);
+            lv_obj_set_style_border_color(footer, theme->border_color(), 0);
+            lv_obj_set_style_bg_color(footer, theme->background_color(), 0);
+            lv_obj_set_flex_flow(footer, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(footer, LV_FLEX_ALIGN_SPACE_EVENLY,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_scrollbar_mode(footer, LV_SCROLLBAR_MODE_OFF);
+
+            auto add_button_hint = [footer, theme](const char* text) {
+                auto label = lv_label_create(footer);
+                lv_obj_set_width(label, LV_HOR_RES / 2 - theme->spacing(6));
+                lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+                lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+                lv_obj_set_style_text_color(label, theme->text_color(), 0);
+                lv_label_set_text(label, text);
+            };
+            add_button_hint("A  PAUSE\nRESUME");
+            add_button_hint("B  TRANSCRIBE\nSTOP");
+        }
+
+        SetChatMessage("system",
+                       "AGENT HUB\nSay \"Computer\" to begin.\nYour conversation appears here.");
+    }
+
+    void ClearChatMessages() override {
+        SpiLcdDisplay::ClearChatMessages();
+        SetChatMessage("system",
+                       "AGENT HUB\nSay \"Computer\" to begin.\nYour conversation appears here.");
+    }
+};
+
 class Df_K10Board : public WifiBoard {
 private:
-    i2c_master_bus_handle_t i2c_bus_;
-    esp_io_expander_handle_t io_expander;
-    LcdDisplay *display_;
-    button_handle_t btn_a;
-    button_handle_t btn_b;
-    EspVideo* camera_;
+    i2c_master_bus_handle_t i2c_bus_ = nullptr;
+    esp_io_expander_handle_t io_expander_ = nullptr;
+    LcdDisplay* display_ = nullptr;
+    button_handle_t btn_a_ = nullptr;
+    button_handle_t btn_b_ = nullptr;
+    EspVideo* camera_ = nullptr;
 
     button_driver_t* btn_a_driver_ = nullptr;
     button_driver_t* btn_b_driver_ = nullptr;
@@ -64,42 +121,38 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
-    esp_err_t IoExpanderSetLevel(uint16_t pin_mask, uint8_t level) {
-        return esp_io_expander_set_level(io_expander, pin_mask, level);
-    }
-
     uint8_t IoExpanderGetLevel(uint16_t pin_mask) {
         uint32_t pin_val = 0;
-        esp_io_expander_get_level(io_expander, DRV_IO_EXP_INPUT_MASK, &pin_val);
+        ESP_ERROR_CHECK(esp_io_expander_get_level(io_expander_, DRV_IO_EXP_INPUT_MASK, &pin_val));
         pin_mask &= DRV_IO_EXP_INPUT_MASK;
         return (uint8_t)((pin_val & pin_mask) ? 1 : 0);
     }
 
     void InitializeIoExpander() {
-        esp_io_expander_new_i2c_tca95xx_16bit(
-                i2c_bus_, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000, &io_expander);
+        ESP_ERROR_CHECK(esp_io_expander_new_i2c_tca95xx_16bit(
+                i2c_bus_, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000, &io_expander_));
 
         esp_err_t ret;
-        ret = esp_io_expander_print_state(io_expander);
+        ret = esp_io_expander_print_state(io_expander_);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Print state failed: %s", esp_err_to_name(ret));
         }
 
-        ret = esp_io_expander_set_dir(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, IO_EXPANDER_OUTPUT);
+        ret = esp_io_expander_set_dir(io_expander_, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, IO_EXPANDER_OUTPUT);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Set direction failed: %s", esp_err_to_name(ret));
         }
-        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 0);
+        ret = esp_io_expander_set_level(io_expander_, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 0);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Set level failed: %s", esp_err_to_name(ret));
         }
         vTaskDelay(100 / portTICK_PERIOD_MS);
-        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 1);
+        ret = esp_io_expander_set_level(io_expander_, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 1);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Set level failed: %s", esp_err_to_name(ret));
         }
         ret = esp_io_expander_set_dir(
-                io_expander, DRV_IO_EXP_INPUT_MASK,
+                io_expander_, DRV_IO_EXP_INPUT_MASK,
                 IO_EXPANDER_INPUT);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Set direction failed: %s", esp_err_to_name(ret));
@@ -117,19 +170,19 @@ private:
         btn_a_driver_ = (button_driver_t*)calloc(1, sizeof(button_driver_t));
         btn_a_driver_->enable_power_save = false;
         btn_a_driver_->get_key_level = [](button_driver_t *button_driver) -> uint8_t {
-            return !instance_->IoExpanderGetLevel(IO_EXPANDER_PIN_NUM_2);
+            return !instance_->IoExpanderGetLevel(IO_EXPANDER_PIN_NUM_12);
         };
-        ESP_ERROR_CHECK(iot_button_create(&btn_a_config, btn_a_driver_, &btn_a));
-        iot_button_register_cb(btn_a, BUTTON_SINGLE_CLICK, nullptr, [](void* button_handle, void* usr_data) {
+        ESP_ERROR_CHECK(iot_button_create(&btn_a_config, btn_a_driver_, &btn_a_));
+        iot_button_register_cb(btn_a_, BUTTON_SINGLE_CLICK, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<Df_K10Board*>(usr_data);
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 self->EnterWifiConfigMode();
                 return;
             }
-            app.ToggleChatState();
+            app.ToggleListeningPaused();
         }, this);
-        iot_button_register_cb(btn_a, BUTTON_LONG_PRESS_START, nullptr, [](void* button_handle, void* usr_data) {
+        iot_button_register_cb(btn_a_, BUTTON_LONG_PRESS_START, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<Df_K10Board*>(usr_data);
             auto codec = self->GetAudioCodec();
             auto volume = codec->output_volume() - 10;
@@ -148,19 +201,23 @@ private:
         btn_b_driver_ = (button_driver_t*)calloc(1, sizeof(button_driver_t));
         btn_b_driver_->enable_power_save = false;
         btn_b_driver_->get_key_level = [](button_driver_t *button_driver) -> uint8_t {
-            return !instance_->IoExpanderGetLevel(IO_EXPANDER_PIN_NUM_12);
+            return !instance_->IoExpanderGetLevel(IO_EXPANDER_PIN_NUM_2);
         };
-        ESP_ERROR_CHECK(iot_button_create(&btn_b_config, btn_b_driver_, &btn_b));
-        iot_button_register_cb(btn_b, BUTTON_SINGLE_CLICK, nullptr, [](void* button_handle, void* usr_data) {
+        ESP_ERROR_CHECK(iot_button_create(&btn_b_config, btn_b_driver_, &btn_b_));
+        iot_button_register_cb(btn_b_, BUTTON_SINGLE_CLICK, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<Df_K10Board*>(usr_data);
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 self->EnterWifiConfigMode();
                 return;
             }
-            app.ToggleChatState();
+            if (app.IsListeningPaused()) {
+                self->GetDisplay()->ShowNotification("Press A to resume listening");
+                return;
+            }
+            app.ToggleContinuousTranscription();
         }, this);
-        iot_button_register_cb(btn_b, BUTTON_LONG_PRESS_START, nullptr, [](void* button_handle, void* usr_data) {
+        iot_button_register_cb(btn_b_, BUTTON_LONG_PRESS_START, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<Df_K10Board*>(usr_data);
             auto codec = self->GetAudioCodec();
             auto volume = codec->output_volume() + 10;
@@ -243,7 +300,7 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
-        display_ = new SpiLcdDisplay(panel_io, panel,
+        display_ = new AgentHubDisplay(panel_io, panel,
                                 DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
@@ -251,6 +308,26 @@ private:
     void InitializeIot() {
         led_strip_ = new CircularStrip(BUILTIN_LED_GPIO, 3);
         new LedStripControl(led_strip_);
+    }
+
+    void InitializeSerialInput() {
+        xTaskCreate(XiaoSerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
+    }
+
+    uint8_t DetectEs7243eAddress() {
+        constexpr uint8_t addresses[] = {
+            AUDIO_CODEC_ES7243E_ADDR_PRIMARY,
+            AUDIO_CODEC_ES7243E_ADDR_SECONDARY,
+        };
+        for (uint8_t address : addresses) {
+            if (i2c_master_probe(i2c_bus_, address, 100) == ESP_OK) {
+                ESP_LOGI(TAG, "Detected ES7243E at 0x%02x", address);
+                return address;
+            }
+        }
+        ESP_LOGW(TAG, "ES7243E probe failed; trying primary address 0x%02x",
+                 AUDIO_CODEC_ES7243E_ADDR_PRIMARY);
+        return AUDIO_CODEC_ES7243E_ADDR_PRIMARY;
     }
 
 public:
@@ -262,6 +339,7 @@ public:
         InitializeButtons();
         InitializeIot();
         InitializeCamera();
+        InitializeSerialInput();
     }
 
     virtual Led* GetLed() override {
@@ -278,9 +356,7 @@ public:
                     AUDIO_I2S_GPIO_WS,
                     AUDIO_I2S_GPIO_DOUT,
                     AUDIO_I2S_GPIO_DIN,
-                    AUDIO_CODEC_PA_PIN,
-                    AUDIO_CODEC_ES8311_ADDR,
-                    AUDIO_CODEC_ES7210_ADDR,
+                    DetectEs7243eAddress(),
                     AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
