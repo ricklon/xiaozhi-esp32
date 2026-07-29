@@ -8,9 +8,21 @@ keeps the physical controls visible:
 
 * A: pause/resume all listening, including local wake-word detection; hold for
   one second to lower volume.
-* B: start/stop continuous transcription while listening is enabled; hold for
-  one second to raise volume. Agent Hub saves each VAD-segmented transcript
-  without invoking the LLM or speaker.
+* B: start/stop continuous transcription while listening is enabled;
+  double-click to capture a photo in the transcript; hold for one second to
+  raise volume. Agent Hub saves each VAD-segmented transcript without invoking
+  the LLM or speaker.
+
+The header contains a compact network/emotion indicator, leaving the main area
+exclusively for the scrolling conversation. A photo appears in that conversation
+immediately after capture, then uploads through Agent Hub's authenticated image
+endpoint.
+
+Transcript snapshots add a `purpose=transcript` field to the existing multipart
+image upload. Agent Hub should save these uploads as chronological
+`[image:PATH]` history entries for the device and return an immediate accepted
+response without running vision inference. Uploads without this field retain
+the normal camera-explanation behavior.
 
 When idle, say `Computer` to use the normal spoken assistant. When listening is
 paused, the wake word cannot reactivate the device.

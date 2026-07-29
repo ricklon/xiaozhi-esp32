@@ -185,6 +185,21 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGI(TAG, "No websocket section found!");
     }
 
+    // Configure cameras during authenticated check-in so capture-only modes
+    // do not depend on a later MCP handshake. Agent Hub advertises this image
+    // endpoint alongside the WebSocket and heartbeat endpoints.
+    cJSON *image = cJSON_GetObjectItem(root, "image");
+    auto camera = board.GetCamera();
+    if (camera != nullptr && cJSON_IsObject(image)) {
+        cJSON *image_url = cJSON_GetObjectItem(image, "url");
+        cJSON *image_token = cJSON_GetObjectItem(image, "token");
+        if (cJSON_IsString(image_url)) {
+            camera->SetExplainUrl(
+                image_url->valuestring,
+                cJSON_IsString(image_token) ? image_token->valuestring : "");
+        }
+    }
+
     cJSON *heartbeat = cJSON_GetObjectItem(root, "heartbeat");
     if (cJSON_IsObject(heartbeat)) {
         Settings settings("heartbeat", true);

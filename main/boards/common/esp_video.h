@@ -40,6 +40,8 @@ private:
     std::string explain_token_;
     std::thread encoder_thread_;
 
+    std::string Upload(const std::string& question, const char* purpose);
+
 public:
     EspVideo(const esp_video_init_config_t& config);
     ~EspVideo();
@@ -50,4 +52,5 @@ public:
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
     virtual std::string Explain(const std::string& question);
+    std::string UploadTranscriptSnapshot();
 };

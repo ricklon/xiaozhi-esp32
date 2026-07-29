@@ -7,7 +7,7 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
-#include "esp_video.h"
+#include "esp32_camera.h"
 #include "xiao_serial_commands.h"
 
 #include "led/circular_strip.h"
@@ -18,11 +18,17 @@
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 
+#include <atomic>
+#include <exception>
+
 #include "esp_io_expander_tca95xx_16bit.h"
 
 #define TAG "DF-K10"
 
 class AgentHubDisplay : public SpiLcdDisplay {
+private:
+    lv_obj_t* footer_ = nullptr;
+
 public:
     AgentHubDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                     int width, int height, int offset_x, int offset_y,
@@ -41,29 +47,65 @@ public:
             DisplayLockGuard lock(this);
             auto theme = static_cast<LvglTheme*>(current_theme_);
 
-            auto footer = lv_obj_create(container_);
-            lv_obj_set_size(footer, LV_HOR_RES, 54);
-            lv_obj_set_style_radius(footer, 0, 0);
-            lv_obj_set_style_pad_all(footer, theme->spacing(2), 0);
-            lv_obj_set_style_border_width(footer, 1, 0);
-            lv_obj_set_style_border_side(footer, LV_BORDER_SIDE_TOP, 0);
-            lv_obj_set_style_border_color(footer, theme->border_color(), 0);
-            lv_obj_set_style_bg_color(footer, theme->background_color(), 0);
-            lv_obj_set_flex_flow(footer, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(footer, LV_FLEX_ALIGN_SPACE_EVENLY,
+            // Keep both the static AI glyph and animated emotions inside the
+            // header. The base WeChat layout attaches them to the screen,
+            // which lets a 128px K10 emotion obscure the transcript.
+            auto header_left = lv_obj_create(top_bar_);
+            lv_obj_set_size(header_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_style_bg_opa(header_left, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(header_left, 0, 0);
+            lv_obj_set_style_pad_all(header_left, 0, 0);
+            lv_obj_set_style_pad_column(header_left, theme->spacing(2), 0);
+            lv_obj_set_flex_flow(header_left, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(header_left, LV_FLEX_ALIGN_START,
                                   LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            lv_obj_set_scrollbar_mode(footer, LV_SCROLLBAR_MODE_OFF);
 
-            auto add_button_hint = [footer, theme](const char* text) {
-                auto label = lv_label_create(footer);
+            lv_obj_set_parent(network_label_, header_left);
+
+            auto emotion_badge = lv_obj_create(header_left);
+            lv_obj_set_size(emotion_badge, 26, 26);
+            lv_obj_set_style_radius(emotion_badge, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_pad_all(emotion_badge, 0, 0);
+            lv_obj_set_style_border_width(emotion_badge, 0, 0);
+            lv_obj_set_style_bg_opa(emotion_badge, LV_OPA_TRANSP, 0);
+            lv_obj_set_scrollbar_mode(emotion_badge, LV_SCROLLBAR_MODE_OFF);
+
+            lv_obj_set_parent(emoji_label_, emotion_badge);
+            lv_obj_set_style_text_font(emoji_label_, theme->icon_font()->font(), 0);
+            lv_obj_center(emoji_label_);
+
+            lv_obj_set_parent(emoji_image_, emotion_badge);
+            // DF-K10 uses the 128px Noto collection; 48/256 scales it to 24px.
+            lv_image_set_scale(emoji_image_, 48);
+            lv_obj_center(emoji_image_);
+
+            // Reparenting the network label leaves the right-icons group as
+            // the first child. Restore left/right header order for flex layout.
+            lv_obj_move_to_index(header_left, 0);
+
+            footer_ = lv_obj_create(container_);
+            lv_obj_set_size(footer_, LV_HOR_RES, 54);
+            lv_obj_set_style_radius(footer_, 0, 0);
+            lv_obj_set_style_pad_all(footer_, theme->spacing(2), 0);
+            lv_obj_set_style_border_width(footer_, 1, 0);
+            lv_obj_set_style_border_side(footer_, LV_BORDER_SIDE_TOP, 0);
+            lv_obj_set_style_border_color(footer_, theme->border_color(), 0);
+            lv_obj_set_style_bg_color(footer_, theme->background_color(), 0);
+            lv_obj_set_flex_flow(footer_, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(footer_, LV_FLEX_ALIGN_SPACE_EVENLY,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_scrollbar_mode(footer_, LV_SCROLLBAR_MODE_OFF);
+
+            auto add_button_hint = [this, theme](const char* text) {
+                auto label = lv_label_create(footer_);
                 lv_obj_set_width(label, LV_HOR_RES / 2 - theme->spacing(6));
                 lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
                 lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
                 lv_obj_set_style_text_color(label, theme->text_color(), 0);
                 lv_label_set_text(label, text);
             };
-            add_button_hint("A  PAUSE\nRESUME");
-            add_button_hint("B  TRANSCRIBE\nSTOP");
+            add_button_hint("A  PAUSE\nHOLD VOL-");
+            add_button_hint("B  TRANSCRIBE\n2x PHOTO");
         }
 
         SetChatMessage("system",
@@ -84,7 +126,8 @@ private:
     LcdDisplay* display_ = nullptr;
     button_handle_t btn_a_ = nullptr;
     button_handle_t btn_b_ = nullptr;
-    EspVideo* camera_ = nullptr;
+    Esp32Camera* camera_ = nullptr;
+    std::atomic<bool> photo_capture_in_progress_{false};
 
     button_driver_t* btn_a_driver_ = nullptr;
     button_driver_t* btn_b_driver_ = nullptr;
@@ -92,6 +135,42 @@ private:
     CircularStrip* led_strip_;
 
     static Df_K10Board* instance_;
+
+    static void CaptureTranscriptPhotoTask(void* arg) {
+        auto self = static_cast<Df_K10Board*>(arg);
+        auto display = self->GetDisplay();
+        display->ShowNotification("Taking photo...");
+
+        try {
+            if (!self->camera_ || !self->camera_->Capture()) {
+                display->ShowNotification("Photo capture failed");
+            } else {
+                self->camera_->UploadTranscriptSnapshot();
+                display->ShowNotification("Photo added to transcript");
+            }
+        } catch (const std::exception& error) {
+            ESP_LOGE(TAG, "Transcript photo failed: %s", error.what());
+            display->ShowNotification("Photo upload failed");
+        }
+
+        self->photo_capture_in_progress_.store(false);
+        vTaskDelete(nullptr);
+    }
+
+    void CaptureTranscriptPhoto() {
+        if (photo_capture_in_progress_.exchange(true)) {
+            GetDisplay()->ShowNotification("Photo already in progress");
+            return;
+        }
+
+        BaseType_t created = xTaskCreate(CaptureTranscriptPhotoTask,
+                                         "transcript_photo", 8192, this, 1, nullptr);
+        if (created != pdPASS) {
+            photo_capture_in_progress_.store(false);
+            ESP_LOGE(TAG, "Failed to create transcript photo task");
+            GetDisplay()->ShowNotification("Unable to start camera");
+        }
+    }
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -217,6 +296,15 @@ private:
             }
             app.ToggleContinuousTranscription();
         }, this);
+        iot_button_register_cb(btn_b_, BUTTON_DOUBLE_CLICK, nullptr, [](void* button_handle, void* usr_data) {
+            auto self = static_cast<Df_K10Board*>(usr_data);
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting) {
+                self->EnterWifiConfigMode();
+                return;
+            }
+            self->CaptureTranscriptPhoto();
+        }, this);
         iot_button_register_cb(btn_b_, BUTTON_LONG_PRESS_START, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<Df_K10Board*>(usr_data);
             auto codec = self->GetAudioCodec();
@@ -230,43 +318,34 @@ private:
     }
 
     void InitializeCamera() {
-        static esp_cam_ctlr_dvp_pin_config_t dvp_pin_config = {
-            .data_width = CAM_CTLR_DATA_WIDTH_8,
-            .data_io = {
-                [0] = CAMERA_PIN_D2,
-                [1] = CAMERA_PIN_D3,
-                [2] = CAMERA_PIN_D4,
-                [3] = CAMERA_PIN_D5,
-                [4] = CAMERA_PIN_D6,
-                [5] = CAMERA_PIN_D7,
-                [6] = CAMERA_PIN_D8,
-                [7] = CAMERA_PIN_D9,
-            },
-            .vsync_io = CAMERA_PIN_VSYNC,
-            .de_io = CAMERA_PIN_HREF,
-            .pclk_io = CAMERA_PIN_PCLK,
-            .xclk_io = CAMERA_PIN_XCLK,
-        };
-
-        esp_video_init_sccb_config_t sccb_config = {
-            .init_sccb = false,
-            .i2c_handle = i2c_bus_,
-            .freq = 100000,
-        };
-
-        esp_video_init_dvp_config_t dvp_config = {
-            .sccb_config = sccb_config,
-            .reset_pin = CAMERA_PIN_RESET,
-            .pwdn_pin = CAMERA_PIN_PWDN,
-            .dvp_pin = dvp_pin_config,
-            .xclk_freq = XCLK_FREQ_HZ,
-        };
-
-        esp_video_init_config_t video_config = {
-            .dvp = &dvp_config,
-        };
-
-        camera_ = new EspVideo(video_config);
+        camera_config_t camera_config = {};
+        camera_config.pin_pwdn = CAMERA_PIN_PWDN;
+        camera_config.pin_reset = CAMERA_PIN_RESET;
+        camera_config.pin_xclk = CAMERA_PIN_XCLK;
+        camera_config.pin_sccb_sda = -1;
+        camera_config.pin_sccb_scl = -1;
+        camera_config.pin_d7 = CAMERA_PIN_D9;
+        camera_config.pin_d6 = CAMERA_PIN_D8;
+        camera_config.pin_d5 = CAMERA_PIN_D7;
+        camera_config.pin_d4 = CAMERA_PIN_D6;
+        camera_config.pin_d3 = CAMERA_PIN_D5;
+        camera_config.pin_d2 = CAMERA_PIN_D4;
+        camera_config.pin_d1 = CAMERA_PIN_D3;
+        camera_config.pin_d0 = CAMERA_PIN_D2;
+        camera_config.pin_vsync = CAMERA_PIN_VSYNC;
+        camera_config.pin_href = CAMERA_PIN_HREF;
+        camera_config.pin_pclk = CAMERA_PIN_PCLK;
+        camera_config.xclk_freq_hz = XCLK_FREQ_HZ;
+        camera_config.ledc_timer = LEDC_TIMER_0;
+        camera_config.ledc_channel = LEDC_CHANNEL_0;
+        camera_config.pixel_format = PIXFORMAT_RGB565;
+        camera_config.frame_size = FRAMESIZE_VGA;
+        camera_config.jpeg_quality = 12;
+        camera_config.fb_count = 1;
+        camera_config.fb_location = CAMERA_FB_IN_PSRAM;
+        camera_config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+        camera_config.sccb_i2c_port = 1;
+        camera_ = new Esp32Camera(camera_config);
     }
 
     void InitializeIli9341Display() {
