@@ -2,7 +2,9 @@
 # Board Testing Workflow Script
 # Usage: ./test-board.sh <board-name>
 
-BOARD=$1
+set -u
+
+BOARD="${1:-}"
 
 if [ -z "$BOARD" ]; then
     echo "Usage: ./test-board.sh <board-name>"
@@ -25,35 +27,46 @@ echo "✅ Board directory exists"
 echo ""
 echo "Checking required files..."
 REQUIRED_FILES=("config.h" "config.json" "sdkconfig.defaults")
+missing_files=0
 for file in "${REQUIRED_FILES[@]}"; do
     if [ -f "main/boards/$BOARD/$file" ]; then
         echo "✅ $file exists"
     else
         echo "❌ $file missing"
+        missing_files=1
     fi
 done
 
 # Check for .cc file
-CC_FILE=$(ls main/boards/$BOARD/*.cc 2>/dev/null | head -1)
+CC_FILE=$(find "main/boards/$BOARD" -maxdepth 1 -type f -name '*.cc' -print -quit)
 if [ -n "$CC_FILE" ]; then
-    echo "✅ CC file exists: $(basename $CC_FILE)"
+    echo "✅ CC file exists: $(basename "$CC_FILE")"
 else
     echo "❌ No .cc file found"
+    missing_files=1
+fi
+
+if [ "$missing_files" -ne 0 ]; then
+    echo "❌ Required board files are missing"
+    exit 1
 fi
 
 # Step 3: Try to build for this board
 echo ""
 echo "Attempting to build..."
-./switch-board.sh $BOARD build 2>&1 | tee /tmp/board-test-$BOARD.log
+log_file="/tmp/board-test-${BOARD//\//-}.log"
+./switch-board.sh "$BOARD" build 2>&1 | tee "$log_file"
+build_status=${PIPESTATUS[0]}
 
-if [ ${PIPESTATUS[0]} -eq 0 ]; then
+if [ "$build_status" -eq 0 ]; then
     echo ""
     echo "✅ Build successful for $BOARD"
     echo "   You can now flash with: ./switch-board.sh $BOARD flash"
 else
     echo ""
     echo "❌ Build failed for $BOARD"
-    echo "   Check /tmp/board-test-$BOARD.log for details"
+    echo "   Check $log_file for details"
+    exit "$build_status"
 fi
 
 echo ""

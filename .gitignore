@@ -21,3 +21,6 @@ main/mmap_generate_emoji.h
 *.bin
 mmap_generate_*.h
 .clangd
+
+# switch-board.sh per-board merged-defaults cache
+.switch-board/

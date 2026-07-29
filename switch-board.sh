@@ -17,6 +17,12 @@
 #
 # Environment:
 #   PORT=<dev>   Serial port override (default: auto-detect /dev/ttyACM0)
+#   AGENT_HUB_PUBLIC_HOST=<host>
+#                Agent Hub Funnel host for df-k10
+#   AGENT_HUB_SERVER_ENROLLMENT_TOKEN=<token>
+#                Agent Hub enrollment token embedded in df-k10 firmware
+#   AGENT_HUB_ENV_FILE=<path>
+#                dotenv fallback (default: ../agent-hub/.env when present)
 #
 # Examples:
 #   ./switch-board.sh xiao-esp32-c3 flash
@@ -56,8 +62,13 @@ build_dir() {
     echo "build-$(echo "$1" | tr '/' '-')"
 }
 
-defaults_stamp() {
-    echo "$(build_dir "$1")/.sdkconfig.defaults.merged"
+# Persistent cache for a board's merged sdkconfig.defaults. Lives OUTSIDE the
+# build dir (so set-target never sees a pre-created non-CMake build dir and
+# refuses to fullclean it) and outside /tmp (so the path CMake bakes into
+# build.ninja still exists on later incremental builds). Doubles as the
+# change-detection baseline. Gitignored via .switch-board/.
+defaults_cache() {
+    echo ".switch-board/$(echo "$1" | tr '/' '-').defaults"
 }
 
 board_target() {
@@ -72,10 +83,10 @@ board_target() {
 #   2. sdkconfig.defaults.<target>  (target-level tweaks, if present)
 #   3. main/boards/<board>/sdkconfig.defaults  (board authority)
 #
-# The setup path writes this to a STABLE file inside the build dir (the stamp)
-# and passes that to -DSDKCONFIG_DEFAULTS, so CMake bakes a path that still
-# exists on later incremental builds. (A /tmp mktemp path gets cleaned out from
-# under us and breaks ninja's re-run of CMake.)
+# The setup path writes this to the persistent defaults_cache and passes that
+# to -DSDKCONFIG_DEFAULTS, so CMake bakes a path that still exists on later
+# incremental builds. (A /tmp mktemp path gets cleaned out from under us and
+# breaks ninja's re-run of CMake.)
 merge_defaults() {
     local board="$1" target="$2" outfile="$3"
     mkdir -p "$(dirname "$outfile")"
@@ -84,6 +95,49 @@ merge_defaults() {
         [ -f "sdkconfig.defaults.$target" ]                && cat "sdkconfig.defaults.$target"
         [ -f "$(board_dir "$board")/sdkconfig.defaults" ]  && cat "$(board_dir "$board")/sdkconfig.defaults"
     } > "$outfile"
+
+    # The K10 enrolls through Agent Hub's public HTTPS Funnel. Keep the secret
+    # out of tracked defaults while allowing the same value used by Agent Hub's
+    # .env to be injected into the firmware. The generated cache is gitignored.
+    if [ "$board" = "df-k10" ]; then
+        local agent_hub_env agent_hub_host agent_hub_token dotenv_key dotenv_value
+        agent_hub_env="${AGENT_HUB_ENV_FILE:-../agent-hub/.env}"
+        agent_hub_host="${AGENT_HUB_PUBLIC_HOST:-}"
+        agent_hub_token="${AGENT_HUB_SERVER_ENROLLMENT_TOKEN:-}"
+
+        # Parse only the two required dotenv assignments; do not source the
+        # file, because dotenv files should never be executed as shell code.
+        if [ -z "$agent_hub_token" ] && [ -f "$agent_hub_env" ]; then
+            while IFS='=' read -r dotenv_key dotenv_value; do
+                dotenv_value="${dotenv_value%$'\r'}"
+                dotenv_value="${dotenv_value%\"}"
+                dotenv_value="${dotenv_value#\"}"
+                dotenv_value="${dotenv_value%\'}"
+                dotenv_value="${dotenv_value#\'}"
+                case "$dotenv_key" in
+                    AGENT_HUB_PUBLIC_HOST) agent_hub_host="$dotenv_value" ;;
+                    AGENT_HUB_SERVER_ENROLLMENT_TOKEN) agent_hub_token="$dotenv_value" ;;
+                esac
+            done < "$agent_hub_env"
+        fi
+
+        agent_hub_host="${agent_hub_host:-agent-hub.panthera-hamlet.ts.net}"
+
+        [ -n "$agent_hub_token" ] || return 0
+
+        [[ "$agent_hub_host" =~ ^[A-Za-z0-9.-]+$ ]] ||
+            die "AGENT_HUB_PUBLIC_HOST must be a hostname without a scheme, path, or port"
+        [[ "$agent_hub_token" =~ ^[A-Za-z0-9._~-]+$ ]] ||
+            die "AGENT_HUB_SERVER_ENROLLMENT_TOKEN contains characters that require URL encoding"
+
+        printf '\nCONFIG_OTA_URL="https://%s/xiaozhi/ota/?enrollment_token=%s"\n' \
+            "$agent_hub_host" "$agent_hub_token" >> "$outfile"
+    fi
+
+    # A missing optional defaults file makes the final test in the group
+    # return 1.  Under `set -e` that used to abort setup for boards that only
+    # inherit project/target defaults, even though the merge succeeded.
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -135,16 +189,17 @@ cmd_status() {
         echo ""
         echo "Key settings:"
         grep -E "^CONFIG_(IDF_TARGET|BOARD_TYPE_[A-Z0-9_]+=y|ESPTOOLPY_FLASHSIZE=\"|LANGUAGE_[A-Z_]+=y|OTA_URL=)" \
-            "$bdir/sdkconfig" 2>/dev/null | grep -v "is not set" | sed 's/^/  /'
+            "$bdir/sdkconfig" 2>/dev/null | grep -v "is not set" |
+            sed -E 's/(enrollment_token=)[^"&]*/\1<redacted>/g; s/^/  /'
     fi
 }
 
 cmd_setup() {
     local board="$1"
-    local bdir target current_target stamp abs_stamp
+    local bdir target current_target cache abs_cache
 
     bdir=$(build_dir "$board")
-    stamp=$(defaults_stamp "$board")
+    cache=$(defaults_cache "$board")
     target=$(board_target "$board")
 
     echo "Setting up $board (target: $target, build dir: $bdir)"
@@ -158,20 +213,20 @@ cmd_setup() {
         fi
     fi
 
-    # Write the merged defaults to the stamp (a stable path inside the build
-    # dir) and hand CMake an absolute path to it, so ninja's later CMake
-    # re-runs can always find it.
-    merge_defaults "$board" "$target" "$stamp"
-    abs_stamp="$(cd "$(dirname "$stamp")" && pwd)/$(basename "$stamp")"
-    idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -DSDKCONFIG_DEFAULTS="$abs_stamp" set-target "$target"
+    # Write the merged defaults to the persistent cache (outside the build dir)
+    # and hand CMake an absolute path to it. set-target then creates the build
+    # dir itself, and ninja's later CMake re-runs can always find the file.
+    merge_defaults "$board" "$target" "$cache"
+    abs_cache="$(cd "$(dirname "$cache")" && pwd)/$(basename "$cache")"
+    idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -DSDKCONFIG_DEFAULTS="$abs_cache" set-target "$target"
     echo "Done — $bdir is ready."
 }
 
 cmd_build() {
     local board="$1"
-    local bdir target stamp
+    local bdir target cache
     bdir=$(build_dir "$board")
-    stamp=$(defaults_stamp "$board")
+    cache=$(defaults_cache "$board")
     target=$(board_target "$board")
 
     if [ ! -f "$bdir/CMakeCache.txt" ]; then
@@ -180,7 +235,7 @@ cmd_build() {
         local probe
         probe=$(mktemp)
         merge_defaults "$board" "$target" "$probe"
-        if [ ! -f "$stamp" ] || ! cmp -s "$probe" "$stamp"; then
+        if [ ! -f "$cache" ] || ! cmp -s "$probe" "$cache"; then
             echo "Board defaults changed for $board, re-running setup..."
             cmd_setup "$board"
         fi
@@ -196,9 +251,10 @@ cmd_flash() {
     local bdir
     bdir=$(build_dir "$board")
 
-    if [ ! -f "$bdir/xiaozhi.bin" ]; then
-        cmd_build "$board"
-    fi
+    # Always run the incremental build. Besides being cheap when nothing has
+    # changed, this detects a new Agent Hub token/defaults before flashing and
+    # prevents an older binary from being reused silently.
+    cmd_build "$board"
 
     echo "Flashing $board to $port..."
     idf.py -B "$bdir" -DSDKCONFIG="$bdir/sdkconfig" -p "$port" flash
