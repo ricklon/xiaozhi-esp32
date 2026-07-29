@@ -424,6 +424,17 @@ void McpServer::AddUserOnlyTool(const std::string& name, const std::string& desc
     AddTool(tool);
 }
 
+std::vector<std::string> McpServer::GetToolNames(bool include_user_only) const {
+    std::vector<std::string> names;
+    names.reserve(tools_.size());
+    for (const auto* tool : tools_) {
+        if (include_user_only || !tool->user_only()) {
+            names.push_back(tool->name());
+        }
+    }
+    return names;
+}
+
 void McpServer::ParseMessage(const std::string& message) {
     cJSON* json = cJSON_Parse(message.c_str());
     if (json == nullptr) {

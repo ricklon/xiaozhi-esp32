@@ -332,6 +332,7 @@ public:
     void AddTool(McpTool* tool);
     void AddTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
     void AddUserOnlyTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
+    std::vector<std::string> GetToolNames(bool include_user_only = false) const;
     void ParseMessage(const cJSON* json);
     void ParseMessage(const std::string& message);
 

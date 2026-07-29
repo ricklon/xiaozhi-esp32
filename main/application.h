@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 
 #include <string>
+#include <atomic>
 #include <mutex>
 #include <deque>
 #include <memory>
@@ -32,6 +33,7 @@
 #define MAIN_EVENT_START_LISTENING      (1 << 10)
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
+#define MAIN_EVENT_TOGGLE_TRANSCRIPTION (1 << 13)
 
 
 enum AecMode {
@@ -93,6 +95,12 @@ public:
     void ToggleChatState();
 
     /**
+     * Toggle continuous, transcription-only listening. Audio is segmented by
+     * the server VAD and transcribed without invoking the assistant or TTS.
+     */
+    void ToggleContinuousTranscription();
+
+    /**
      * Start listening (event-based, thread-safe)
      * Sends MAIN_EVENT_START_LISTENING to be handled in Run()
      */
@@ -103,6 +111,14 @@ public:
      * Sends MAIN_EVENT_STOP_LISTENING to be handled in Run()
      */
     void StopListening();
+
+    /**
+     * Pause or resume all local listening, including wake-word detection.
+     * The setting remains active until explicitly toggled or the device reboots.
+     */
+    void SetListeningPaused(bool paused);
+    void ToggleListeningPaused();
+    bool IsListeningPaused() const { return listening_paused_.load(); }
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
@@ -145,14 +161,19 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    std::atomic<bool> listening_paused_{false};
+    std::atomic<bool> continuous_transcription_{false};
+    std::atomic<bool> transcription_stopping_{false};
     int clock_ticks_ = 0;
     int64_t last_activity_time_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
+    TaskHandle_t heartbeat_task_handle_ = nullptr;
 
 
     // Event handlers
     void HandleStateChangedEvent();
     void HandleToggleChatEvent();
+    void HandleToggleTranscriptionEvent();
     void HandleStartListeningEvent();
     void HandleStopListeningEvent();
     void HandleNetworkConnectedEvent();
@@ -164,6 +185,9 @@ private:
 
     // Activation task (runs in background)
     void ActivationTask();
+    bool IsHeartbeatEnabled() const;
+    bool SendHeartbeat();
+    void StartHeartbeatTask();
 
     // Helper methods
     void CheckAssetsVersion();
