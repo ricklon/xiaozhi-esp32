@@ -19,7 +19,6 @@
 // Add your own networks here, or leave empty and use the serial "!wifi SSID PASSWORD" command.
 // Keep the sentinel {nullptr, nullptr} at the end.
 #define WIFI_NETWORKS { \
-    {"732-50-FUBAR", "aquaman13"}, \
     {nullptr, nullptr} \
 }
 

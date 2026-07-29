@@ -43,7 +43,6 @@
 // Known Wi-Fi networks - stored in NVS at boot.
 // Add networks here or use the serial "!wifi SSID PASSWORD" command.
 #define WIFI_NETWORKS { \
-    {"732-50-FUBAR", "aquaman13"}, \
     {nullptr, nullptr} \
 }
 
