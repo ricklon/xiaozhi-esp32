@@ -9,6 +9,7 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "time_sync.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -329,6 +330,12 @@ void Application::Run() {
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
+
+    // Keep the wall clock correct between (and independent of) OTA check-ins.
+    // Safe to call on every reconnect; the first call starts SNTP, later calls
+    // just force a re-poll.
+    TimeSync::Start();
+
     auto state = GetDeviceState();
 
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
