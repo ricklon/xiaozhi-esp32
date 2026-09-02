@@ -100,6 +100,14 @@ public:
      */
     void ToggleContinuousTranscription();
 
+    /** True while a transcription session is actively streaming (not stopping). */
+    bool IsTranscribing() const {
+        return continuous_transcription_.load() && !transcription_stopping_.load();
+    }
+
+    /** True once an Agent Hub heartbeat has been accepted and not since lost. */
+    bool IsAgentHubOnline() const { return agent_hub_online_.load(); }
+
     /**
      * Start listening (event-based, thread-safe)
      * Sends MAIN_EVENT_START_LISTENING to be handled in Run()
@@ -164,6 +172,7 @@ private:
     std::atomic<bool> listening_paused_{false};
     std::atomic<bool> continuous_transcription_{false};
     std::atomic<bool> transcription_stopping_{false};
+    std::atomic<bool> agent_hub_online_{false};
     int clock_ticks_ = 0;
     int64_t last_activity_time_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;

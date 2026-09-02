@@ -15,19 +15,104 @@
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
+#include <esp_timer.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 
 #include <atomic>
+#include <cstdio>
 #include <exception>
 
 #include "esp_io_expander_tca95xx_16bit.h"
 
 #define TAG "DF-K10"
 
+// Colours for the transcriber-specific UI (independent of the WeChat theme).
+// Navigation = blue (button A), action = amber (button B) — matches the
+// deck-asset-k10 companion's badge language.
+static const lv_color_t kOnlineGreen  = lv_color_hex(0x25B04A);
+static const lv_color_t kOfflineGrey  = lv_color_hex(0x808080);
+static const lv_color_t kRecRed       = lv_color_hex(0xC01818);
+static const lv_color_t kWhite        = lv_color_hex(0xFFFFFF);
+static const lv_color_t kNavBlue      = lv_color_hex(0x2F6FEB);
+static const lv_color_t kActionAmber  = lv_color_hex(0xE8930C);
+
+// Hold button B this long to take a photo. The hold itself steadies the
+// device; capture fires at the end of the hold while still pressed.
+static const uint32_t kPhotoHoldMs = 1000;  // must match btn_b long_press_time
+
 class AgentHubDisplay : public SpiLcdDisplay {
 private:
     lv_obj_t* footer_ = nullptr;
+    lv_obj_t* btn_b_verb_ = nullptr;   // "START"/"STOP" label inside the B chip
+    lv_obj_t* online_dot_ = nullptr;   // header status light: green = hub online
+    lv_obj_t* rec_label_ = nullptr;    // "REC MM:SS" banner, shown while recording
+    lv_obj_t* flash_overlay_ = nullptr; // white full-screen shutter flash
+    lv_obj_t* hold_bar_ = nullptr;      // hold-to-capture progress track
+    lv_obj_t* hold_bar_fill_ = nullptr; // its animated amber fill
+    lv_timer_t* ui_timer_ = nullptr;
+    lv_color_t header_bg_ = {};
+
+    bool recording_shown_ = false;
+    bool hold_active_ = false;
+    int last_online_ = -1;             // -1 = unknown, forces first paint
+    int64_t rec_start_us_ = 0;
+
+    static void UiTimerCb(lv_timer_t* t) {
+        static_cast<AgentHubDisplay*>(lv_timer_get_user_data(t))->UiTick();
+    }
+    static void HideFlashCb(lv_timer_t* t) {
+        auto self = static_cast<AgentHubDisplay*>(lv_timer_get_user_data(t));
+        lv_obj_add_flag(self->flash_overlay_, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    const char* IdleMessage(bool online) const {
+        return online
+            ? "\xE2\x97\x8F ONLINE\nReady to record\n\nPress  B  to start"
+            : "Connecting to Agent Hub\xE2\x80\xA6\n\nCheck Wi-Fi if this persists";
+    }
+
+    // 1 Hz-ish paint of the recorder-specific chrome. Runs in the LVGL task
+    // context (lock already held).
+    void UiTick() {
+        auto& app = Application::GetInstance();
+        bool rec = app.IsTranscribing();
+        int online = app.IsAgentHubOnline() ? 1 : 0;
+
+        if (online != last_online_) {
+            last_online_ = online;
+            if (online_dot_ != nullptr) {
+                lv_obj_set_style_bg_color(online_dot_, online ? kOnlineGreen : kOfflineGrey, 0);
+            }
+            if (!rec && GetDeviceState() == kDeviceStateIdle && !app.IsListeningPaused()) {
+                SetChatMessage("system", IdleMessage(online));
+            }
+        }
+
+        if (rec && !recording_shown_) {
+            recording_shown_ = true;
+            rec_start_us_ = esp_timer_get_time();
+            lv_obj_set_style_bg_color(top_bar_, kRecRed, 0);
+            lv_obj_set_style_bg_opa(top_bar_, LV_OPA_COVER, 0);
+            lv_obj_remove_flag(rec_label_, LV_OBJ_FLAG_HIDDEN);
+            if (btn_b_verb_ != nullptr) lv_label_set_text(btn_b_verb_, "STOP\nhold: photo");
+        } else if (!rec && recording_shown_) {
+            recording_shown_ = false;
+            lv_obj_set_style_bg_color(top_bar_, header_bg_, 0);
+            lv_obj_set_style_bg_opa(top_bar_, LV_OPA_COVER, 0);
+            lv_obj_add_flag(rec_label_, LV_OBJ_FLAG_HIDDEN);
+            if (btn_b_verb_ != nullptr) lv_label_set_text(btn_b_verb_, "START\nhold: photo");
+        }
+
+        if (rec && rec_label_ != nullptr) {
+            int s = (int)((esp_timer_get_time() - rec_start_us_) / 1000000);
+            char buf[24];
+            snprintf(buf, sizeof(buf), "\xE2\x97\x8F REC   %02d:%02d", s / 60, s % 60);
+            lv_label_set_text(rec_label_, buf);
+        }
+    }
+
+    DeviceState GetDeviceState() const { return Application::GetInstance().GetDeviceState(); }
 
 public:
     AgentHubDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -35,6 +120,46 @@ public:
                     bool mirror_x, bool mirror_y, bool swap_xy)
         : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y,
                         mirror_x, mirror_y, swap_xy) {
+    }
+
+    // Brief white "shutter" flash to confirm a photo was taken. Safe to call
+    // from any task.
+    void FlashShutter() {
+        DisplayLockGuard lock(this);
+        if (flash_overlay_ == nullptr) return;
+        lv_obj_remove_flag(flash_overlay_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(flash_overlay_);
+        lv_timer_t* t = lv_timer_create(HideFlashCb, 150, this);
+        lv_timer_set_repeat_count(t, 1);
+    }
+
+    static void HoldAnimCb(void* obj, int32_t v) {
+        lv_obj_set_width(static_cast<lv_obj_t*>(obj), v);
+    }
+
+    // Show the hold-to-capture progress track and fill it over kPhotoHoldMs.
+    // Safe to call from any task.
+    void BeginPhotoHold() {
+        DisplayLockGuard lock(this);
+        if (hold_bar_ == nullptr) return;
+        hold_active_ = true;
+        lv_obj_set_width(hold_bar_fill_, 0);
+        lv_obj_remove_flag(hold_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, hold_bar_fill_);
+        lv_anim_set_values(&a, 0, LV_HOR_RES);
+        lv_anim_set_duration(&a, kPhotoHoldMs);
+        lv_anim_set_exec_cb(&a, HoldAnimCb);
+        lv_anim_start(&a);
+    }
+
+    void CancelPhotoHold() {
+        DisplayLockGuard lock(this);
+        if (hold_bar_ == nullptr || !hold_active_) return;
+        hold_active_ = false;
+        lv_anim_delete(hold_bar_fill_, HoldAnimCb);
+        lv_obj_add_flag(hold_bar_, LV_OBJ_FLAG_HIDDEN);
     }
 
     void SetupUI() override {
@@ -46,6 +171,7 @@ public:
         {
             DisplayLockGuard lock(this);
             auto theme = static_cast<LvglTheme*>(current_theme_);
+            header_bg_ = theme->background_color();
 
             // Keep both the static AI glyph and animated emotions inside the
             // header. The base WeChat layout attaches them to the screen,
@@ -59,6 +185,14 @@ public:
             lv_obj_set_flex_flow(header_left, LV_FLEX_FLOW_ROW);
             lv_obj_set_flex_align(header_left, LV_FLEX_ALIGN_START,
                                   LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+            // Hub online/offline status light.
+            online_dot_ = lv_obj_create(header_left);
+            lv_obj_set_size(online_dot_, 12, 12);
+            lv_obj_set_style_radius(online_dot_, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_border_width(online_dot_, 0, 0);
+            lv_obj_set_style_bg_color(online_dot_, kOfflineGrey, 0);
+            lv_obj_set_scrollbar_mode(online_dot_, LV_SCROLLBAR_MODE_OFF);
 
             lv_obj_set_parent(network_label_, header_left);
 
@@ -83,6 +217,20 @@ public:
             // the first child. Restore left/right header order for flex layout.
             lv_obj_move_to_index(header_left, 0);
 
+            // "REC MM:SS" banner: a red bar directly under the header, hidden
+            // until a transcription session is streaming.
+            rec_label_ = lv_label_create(container_);
+            lv_obj_set_width(rec_label_, LV_HOR_RES);
+            lv_obj_set_style_bg_color(rec_label_, kRecRed, 0);
+            lv_obj_set_style_bg_opa(rec_label_, LV_OPA_COVER, 0);
+            lv_obj_set_style_text_color(rec_label_, kWhite, 0);
+            lv_obj_set_style_text_align(rec_label_, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_pad_ver(rec_label_, theme->spacing(2), 0);
+            lv_obj_set_style_radius(rec_label_, 0, 0);
+            lv_label_set_text(rec_label_, "\xE2\x97\x8F REC   00:00");
+            lv_obj_add_flag(rec_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_to_index(rec_label_, 1);  // right after top_bar_
+
             footer_ = lv_obj_create(container_);
             lv_obj_set_size(footer_, LV_HOR_RES, 54);
             lv_obj_set_style_radius(footer_, 0, 0);
@@ -96,26 +244,77 @@ public:
                                   LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
             lv_obj_set_scrollbar_mode(footer_, LV_SCROLLBAR_MODE_OFF);
 
-            auto add_button_hint = [this, theme](const char* text) {
-                auto label = lv_label_create(footer_);
-                lv_obj_set_width(label, LV_HOR_RES / 2 - theme->spacing(6));
-                lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-                lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-                lv_obj_set_style_text_color(label, theme->text_color(), 0);
-                lv_label_set_text(label, text);
+            // Footer control chips: a coloured [A]/[B] badge + verb + hold hint.
+            auto add_button_chip = [this, theme](const char* letter, lv_color_t badge,
+                                                 const char* text) -> lv_obj_t* {
+                auto chip = lv_obj_create(footer_);
+                lv_obj_set_size(chip, LV_HOR_RES / 2 - theme->spacing(4), LV_SIZE_CONTENT);
+                lv_obj_set_style_bg_opa(chip, LV_OPA_TRANSP, 0);
+                lv_obj_set_style_border_width(chip, 0, 0);
+                lv_obj_set_style_pad_all(chip, 0, 0);
+                lv_obj_set_style_pad_column(chip, theme->spacing(2), 0);
+                lv_obj_set_flex_flow(chip, LV_FLEX_FLOW_ROW);
+                lv_obj_set_flex_align(chip, LV_FLEX_ALIGN_CENTER,
+                                      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+                lv_obj_set_scrollbar_mode(chip, LV_SCROLLBAR_MODE_OFF);
+
+                auto badge_obj = lv_label_create(chip);
+                lv_obj_set_style_radius(badge_obj, 4, 0);
+                lv_obj_set_style_bg_color(badge_obj, badge, 0);
+                lv_obj_set_style_bg_opa(badge_obj, LV_OPA_COVER, 0);
+                lv_obj_set_style_text_color(badge_obj, kWhite, 0);
+                lv_obj_set_style_pad_hor(badge_obj, theme->spacing(2), 0);
+                lv_obj_set_style_pad_ver(badge_obj, theme->spacing(1), 0);
+                lv_label_set_text(badge_obj, letter);
+
+                auto verb = lv_label_create(chip);
+                lv_label_set_long_mode(verb, LV_LABEL_LONG_WRAP);
+                lv_obj_set_style_text_color(verb, theme->text_color(), 0);
+                lv_label_set_text(verb, text);
+                return verb;
             };
-            add_button_hint("A  PAUSE\nHOLD VOL-");
-            add_button_hint("B  TRANSCRIBE\n2x PHOTO");
+            add_button_chip("A", kNavBlue, "PAUSE\nhold: vol-");
+            btn_b_verb_ = add_button_chip("B", kActionAmber, "START\nhold: photo");
+
+            // Hold-to-capture progress track: pinned to the top edge of the
+            // footer, hidden until button B is held.
+            hold_bar_ = lv_obj_create(footer_);
+            lv_obj_set_size(hold_bar_, LV_HOR_RES, 4);
+            lv_obj_add_flag(hold_bar_, LV_OBJ_FLAG_IGNORE_LAYOUT);
+            lv_obj_align(hold_bar_, LV_ALIGN_TOP_MID, 0, -theme->spacing(2));
+            lv_obj_set_style_radius(hold_bar_, 0, 0);
+            lv_obj_set_style_border_width(hold_bar_, 0, 0);
+            lv_obj_set_style_pad_all(hold_bar_, 0, 0);
+            lv_obj_set_style_bg_color(hold_bar_, theme->border_color(), 0);
+            lv_obj_set_scrollbar_mode(hold_bar_, LV_SCROLLBAR_MODE_OFF);
+            hold_bar_fill_ = lv_obj_create(hold_bar_);
+            lv_obj_set_size(hold_bar_fill_, 0, 4);
+            lv_obj_set_pos(hold_bar_fill_, 0, 0);
+            lv_obj_set_style_radius(hold_bar_fill_, 0, 0);
+            lv_obj_set_style_border_width(hold_bar_fill_, 0, 0);
+            lv_obj_set_style_bg_color(hold_bar_fill_, kActionAmber, 0);
+            lv_obj_add_flag(hold_bar_, LV_OBJ_FLAG_HIDDEN);
+
+            // Full-screen white shutter flash, on top of everything, hidden.
+            flash_overlay_ = lv_obj_create(lv_obj_get_screen(container_));
+            lv_obj_set_size(flash_overlay_, LV_HOR_RES, LV_VER_RES);
+            lv_obj_set_pos(flash_overlay_, 0, 0);
+            lv_obj_set_style_bg_color(flash_overlay_, kWhite, 0);
+            lv_obj_set_style_bg_opa(flash_overlay_, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(flash_overlay_, 0, 0);
+            lv_obj_add_flag(flash_overlay_, LV_OBJ_FLAG_IGNORE_LAYOUT);
+            lv_obj_add_flag(flash_overlay_, LV_OBJ_FLAG_HIDDEN);
+
+            ui_timer_ = lv_timer_create(UiTimerCb, 500, this);
         }
 
-        SetChatMessage("system",
-                       "AGENT HUB\nSay \"Computer\" to begin.\nYour conversation appears here.");
+        SetChatMessage("system", IdleMessage(false));
     }
 
     void ClearChatMessages() override {
         SpiLcdDisplay::ClearChatMessages();
         SetChatMessage("system",
-                       "AGENT HUB\nSay \"Computer\" to begin.\nYour conversation appears here.");
+                       IdleMessage(Application::GetInstance().IsAgentHubOnline()));
     }
 };
 
@@ -139,14 +338,15 @@ private:
     static void CaptureTranscriptPhotoTask(void* arg) {
         auto self = static_cast<Df_K10Board*>(arg);
         auto display = self->GetDisplay();
-        display->ShowNotification("Taking photo...");
+        auto agent_display = static_cast<AgentHubDisplay*>(self->display_);
 
         try {
             if (!self->camera_ || !self->camera_->Capture()) {
                 display->ShowNotification("Photo capture failed");
             } else {
+                if (agent_display != nullptr) agent_display->FlashShutter();
                 self->camera_->UploadTranscriptSnapshot();
-                display->ShowNotification("Photo added to transcript");
+                display->ShowNotification("Photo added to transcript", 3000);
             }
         } catch (const std::exception& error) {
             ESP_LOGE(TAG, "Transcript photo failed: %s", error.what());
@@ -303,17 +503,30 @@ private:
                 self->EnterWifiConfigMode();
                 return;
             }
-            self->CaptureTranscriptPhoto();
+            self->CaptureTranscriptPhoto();  // quick alternative to hold-to-capture
+        }, this);
+        // Hold B to take a photo: the press-and-hold steadies the device, a
+        // progress bar fills over kPhotoHoldMs, and the capture fires at the end
+        // of the hold while still pressed.
+        iot_button_register_cb(btn_b_, BUTTON_PRESS_DOWN, nullptr, [](void* button_handle, void* usr_data) {
+            auto self = static_cast<Df_K10Board*>(usr_data);
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting || app.IsListeningPaused()) {
+                return;
+            }
+            static_cast<AgentHubDisplay*>(self->display_)->BeginPhotoHold();
         }, this);
         iot_button_register_cb(btn_b_, BUTTON_LONG_PRESS_START, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<Df_K10Board*>(usr_data);
-            auto codec = self->GetAudioCodec();
-            auto volume = codec->output_volume() + 10;
-            if (volume > 100) {
-                volume = 100;
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting || app.IsListeningPaused()) {
+                return;
             }
-            codec->SetOutputVolume(volume);
-            self->GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
+            self->CaptureTranscriptPhoto();
+        }, this);
+        iot_button_register_cb(btn_b_, BUTTON_PRESS_UP, nullptr, [](void* button_handle, void* usr_data) {
+            auto self = static_cast<Df_K10Board*>(usr_data);
+            static_cast<AgentHubDisplay*>(self->display_)->CancelPhotoHold();
         }, this);
     }
 

@@ -360,6 +360,7 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+    agent_hub_online_ = false;
     continuous_transcription_ = false;
     transcription_stopping_ = false;
     if (protocol_) {
@@ -477,15 +478,18 @@ bool Application::SendHeartbeat() {
     http->SetContent(std::move(body));
     if (!http->Open("POST", url)) {
         ESP_LOGW(TAG, "Unable to reach heartbeat endpoint, error=0x%x", http->GetLastError());
+        agent_hub_online_ = false;
         return false;
     }
     int status = http->GetStatusCode();
     http->Close();
     if (status != 200) {
         ESP_LOGW(TAG, "Heartbeat rejected with HTTP %d", status);
+        agent_hub_online_ = false;
         return false;
     }
     ESP_LOGI(TAG, "Agent Hub heartbeat accepted");
+    agent_hub_online_ = true;
     return true;
 }
 
@@ -720,6 +724,18 @@ void Application::InitializeProtocol() {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
+                });
+            }
+        } else if (strcmp(type->valuestring, "image_caption") == 0) {
+            // Async vision caption for a transcript photo (Agent Hub captions
+            // off the audio path and pushes this when ready, possibly after the
+            // session has stopped). Render it as its own line, distinct from
+            // spoken "stt" bubbles.
+            auto text = cJSON_GetObjectItem(root, "text");
+            if (cJSON_IsString(text)) {
+                ESP_LOGI(TAG, "[image] %s", text->valuestring);
+                Schedule([display, message = std::string("\xF0\x9F\x93\xB7 ") + text->valuestring]() {
+                    display->SetChatMessage("assistant", message.c_str());
                 });
             }
         } else if (strcmp(type->valuestring, "transcription") == 0) {

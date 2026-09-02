@@ -219,6 +219,13 @@ void CircularStrip::OnStateChanged() {
         }
         case kDeviceStateListening:
         case kDeviceStateAudioTesting: {
+            // A live transcription session is a room recorder: full-brightness
+            // solid red so people nearby can tell it is recording, distinct
+            // from the dimmer red of ordinary listening.
+            if (app.IsTranscribing()) {
+                SetAllColor({ 255, 0, 0 });
+                break;
+            }
             StripColor color = { default_brightness_, low_brightness_, low_brightness_ };
             SetAllColor(color);
             break;
