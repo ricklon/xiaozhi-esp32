@@ -24,3 +24,7 @@ mmap_generate_*.h
 
 # switch-board.sh per-board merged-defaults cache
 .switch-board/
+
+# Build-time Wi-Fi credentials and the header switch-board.sh generates from them
+wifi.env
+main/wifi_networks.local.h

@@ -4,6 +4,7 @@
 #include "application.h"
 #include "system_info.h"
 #include "settings.h"
+#include "wifi_networks.h"
 #include "assets/lang_config.h"
 
 #include <freertos/FreeRTOS.h>
@@ -35,7 +36,33 @@ static std::string PrintJsonAndDelete(cJSON* root) {
 // Connection timeout in seconds
 static constexpr int CONNECT_TIMEOUT_SEC = 60;
 
+// Seed any build-time Wi-Fi networks (wifi.env / WIFI_SSID env, baked in via
+// switch-board.sh) into NVS so a freshly flashed device joins without a serial
+// "!wifi" step. Existing NVS entries win; nothing is overwritten.
+static void SeedBuildTimeWifiNetworks() {
+    struct { const char* ssid; const char* pass; } nets[] = {
+        WIFI_NETWORKS_LOCAL
+        {nullptr, nullptr}
+    };
+    if (nets[0].ssid == nullptr) {
+        return;
+    }
+    auto& mgr = SsidManager::GetInstance();
+    for (int i = 0; nets[i].ssid != nullptr; i++) {
+        bool exists = false;
+        for (const auto& item : mgr.GetSsidList()) {
+            if (item.ssid == nets[i].ssid) { exists = true; break; }
+        }
+        if (!exists) {
+            mgr.AddSsid(nets[i].ssid, nets[i].pass ? nets[i].pass : "");
+            ESP_LOGI(TAG, "Seeded build-time Wi-Fi network: %s", nets[i].ssid);
+        }
+    }
+}
+
 WifiBoard::WifiBoard() {
+    SeedBuildTimeWifiNetworks();
+
     // Create connection timeout timer
     esp_timer_create_args_t timer_args = {
         .callback = OnWifiConnectTimeout,
