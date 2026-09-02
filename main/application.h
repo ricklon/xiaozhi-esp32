@@ -109,6 +109,16 @@ public:
     bool IsAgentHubOnline() const { return agent_hub_online_.load(); }
 
     /**
+     * True when the assigned agent runs this device as a continuous
+     * transcriber. Driven by the check-in "mode" field ("assistant" |
+     * "transcription"); defaults to transcriber when unset, since the K10 is a
+     * recorder deck. Assigning an assistant persona ("mode":"assistant") opts
+     * into the talking agent (wake word, B = talk). Cached for the process
+     * lifetime — a mode change takes effect on the next reboot.
+     */
+    bool IsTranscriberMode() const;
+
+    /**
      * Start listening (event-based, thread-safe)
      * Sends MAIN_EVENT_START_LISTENING to be handled in Run()
      */
@@ -173,6 +183,8 @@ private:
     std::atomic<bool> continuous_transcription_{false};
     std::atomic<bool> transcription_stopping_{false};
     std::atomic<bool> agent_hub_online_{false};
+    // -1 = not yet resolved, 0 = assistant, 1 = transcriber. See IsTranscriberMode().
+    mutable std::atomic<int8_t> transcriber_mode_cache_{-1};
     int clock_ticks_ = 0;
     int64_t last_activity_time_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;

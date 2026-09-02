@@ -256,6 +256,19 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGW(TAG, "No server_time section found!");
     }
 
+    // Agent mode from the assigned persona: "assistant" | "transcription".
+    // Persisted so Application::IsTranscriberMode() can read it after the Ota
+    // object is released. An absent field leaves the stored value untouched.
+    cJSON *mode = cJSON_GetObjectItem(root, "mode");
+    if (cJSON_IsString(mode)) {
+        mode_ = mode->valuestring;
+        Settings settings("agent", true);
+        if (settings.GetString("mode") != mode_) {
+            settings.SetString("mode", mode_);
+            ESP_LOGI(TAG, "Agent mode set to '%s'", mode_.c_str());
+        }
+    }
+
     has_new_version_ = false;
     cJSON *firmware = cJSON_GetObjectItem(root, "firmware");
     if (cJSON_IsObject(firmware)) {

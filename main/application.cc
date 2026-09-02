@@ -864,6 +864,18 @@ void Application::ToggleContinuousTranscription() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_TRANSCRIPTION);
 }
 
+bool Application::IsTranscriberMode() const {
+    int8_t cached = transcriber_mode_cache_.load();
+    if (cached < 0) {
+        // Persisted by Ota::CheckVersion from the check-in "mode" field.
+        // Transcriber unless the assigned persona explicitly says "assistant".
+        Settings settings("agent", false);
+        cached = (settings.GetString("mode") == "assistant") ? 0 : 1;
+        transcriber_mode_cache_.store(cached);
+    }
+    return cached != 0;
+}
+
 void Application::StartListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
 }
@@ -907,7 +919,7 @@ void Application::SetListeningPaused(bool paused) {
             display->ShowNotification("Listening paused");
         } else {
             if (GetDeviceState() == kDeviceStateIdle) {
-                audio_service_.EnableWakeWordDetection(true);
+                audio_service_.EnableWakeWordDetection(!IsTranscriberMode());
                 display->SetStatus(Lang::Strings::STANDBY);
             }
             display->ShowNotification("Listening resumed");
@@ -1043,7 +1055,13 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 
 void Application::HandleStartListeningEvent() {
     auto state = GetDeviceState();
-    
+
+    if (IsTranscriberMode()) {
+        ESP_LOGI(TAG, "Start-listening ignored in transcriber mode");
+        audio_service_.EnableWakeWordDetection(false);
+        return;
+    }
+
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -1096,6 +1114,13 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+    if (IsTranscriberMode()) {
+        // A transcriber does not answer to "Computer"; a hit here is almost
+        // certainly a false trigger from the transcribed audio itself.
+        ESP_LOGI(TAG, "Wake word ignored in transcriber mode");
+        audio_service_.EnableWakeWordDetection(false);
+        return;
+    }
     if (IsListeningPaused()) {
         audio_service_.EnableWakeWordDetection(false);
         return;
@@ -1204,7 +1229,7 @@ void Application::HandleStateChangedEvent() {
             } else {
                 display->SetStatus(Lang::Strings::STANDBY);
                 display->SetEmotion("neutral"); // WeChat mode checks child count
-                audio_service_.EnableWakeWordDetection(true);
+                audio_service_.EnableWakeWordDetection(!IsTranscriberMode());
             }
             break;
         case kDeviceStateConnecting:

@@ -29,6 +29,7 @@ public:
     const std::string& GetFirmwareUrl() const { return firmware_url_; }
     const std::string& GetActivationMessage() const { return activation_message_; }
     const std::string& GetActivationCode() const { return activation_code_; }
+    const std::string& GetMode() const { return mode_; }
     std::string GetCheckVersionUrl();
 
 private:
@@ -41,6 +42,7 @@ private:
     bool has_activation_code_ = false;
     bool has_serial_number_ = false;
     bool has_activation_challenge_ = false;
+    std::string mode_;
     std::string current_version_;
     std::string firmware_version_;
     std::string firmware_url_;

@@ -67,9 +67,18 @@ private:
     }
 
     const char* IdleMessage(bool online) const {
-        return online
+        if (!online) {
+            return "Connecting to Agent Hub\xE2\x80\xA6\n\nCheck Wi-Fi if this persists";
+        }
+        return Application::GetInstance().IsTranscriberMode()
             ? "\xE2\x97\x8F ONLINE\nReady to record\n\nPress  B  to start"
-            : "Connecting to Agent Hub\xE2\x80\xA6\n\nCheck Wi-Fi if this persists";
+            : "\xE2\x97\x8F ONLINE\nReady\n\nSay \"Computer\" or press B";
+    }
+
+    const char* BVerb(bool recording) const {
+        if (recording) return "STOP\nhold: photo";
+        return Application::GetInstance().IsTranscriberMode()
+            ? "START\nhold: photo" : "TALK\nhold: photo";
     }
 
     // 1 Hz-ish paint of the recorder-specific chrome. Runs in the LVGL task
@@ -95,13 +104,13 @@ private:
             lv_obj_set_style_bg_color(top_bar_, kRecRed, 0);
             lv_obj_set_style_bg_opa(top_bar_, LV_OPA_COVER, 0);
             lv_obj_remove_flag(rec_label_, LV_OBJ_FLAG_HIDDEN);
-            if (btn_b_verb_ != nullptr) lv_label_set_text(btn_b_verb_, "STOP\nhold: photo");
+            if (btn_b_verb_ != nullptr) lv_label_set_text(btn_b_verb_, BVerb(true));
         } else if (!rec && recording_shown_) {
             recording_shown_ = false;
             lv_obj_set_style_bg_color(top_bar_, header_bg_, 0);
             lv_obj_set_style_bg_opa(top_bar_, LV_OPA_COVER, 0);
             lv_obj_add_flag(rec_label_, LV_OBJ_FLAG_HIDDEN);
-            if (btn_b_verb_ != nullptr) lv_label_set_text(btn_b_verb_, "START\nhold: photo");
+            if (btn_b_verb_ != nullptr) lv_label_set_text(btn_b_verb_, BVerb(false));
         }
 
         if (rec && rec_label_ != nullptr) {
@@ -274,7 +283,7 @@ public:
                 return verb;
             };
             add_button_chip("A", kNavBlue, "PAUSE\nhold: vol-");
-            btn_b_verb_ = add_button_chip("B", kActionAmber, "START\nhold: photo");
+            btn_b_verb_ = add_button_chip("B", kActionAmber, BVerb(false));
 
             // Hold-to-capture progress track: pinned to the top edge of the
             // footer, hidden until button B is held.
@@ -494,7 +503,11 @@ private:
                 self->GetDisplay()->ShowNotification("Press A to resume listening");
                 return;
             }
-            app.ToggleContinuousTranscription();
+            if (app.IsTranscriberMode()) {
+                app.ToggleContinuousTranscription();
+            } else {
+                app.ToggleChatState();  // assistant persona: B starts/stops a conversation
+            }
         }, this);
         iot_button_register_cb(btn_b_, BUTTON_DOUBLE_CLICK, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<Df_K10Board*>(usr_data);
