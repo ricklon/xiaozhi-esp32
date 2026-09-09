@@ -43,7 +43,8 @@ while [ "${#queue[@]}" -gt 0 ]; do
   done < <(python3 -c 'import re, sys
 from pathlib import Path
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
-for match in re.findall(r"""['\''"](\./[^'\''"?]+)(?:\?module)?['\''"]""", text):
+# Bundles also contain source paths as plain strings; only follow JS imports.
+for match in re.findall(r"""(?:\bfrom\s*|\bimport\s*\(\s*)['\''"](\./[^'\''"?]+)(?:\?module)?['\''"]""", text):
     print(match)' "$VENDOR/$current")
 done
 

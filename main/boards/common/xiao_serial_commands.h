@@ -38,6 +38,8 @@ static const char* GetXiaoSerialBoardName() {
     return "XIAO ESP32-C6";
 #elif CONFIG_BOARD_TYPE_XIAO_ESP32C6_EYES
     return "XIAO ESP32-C6 Eyes";
+#elif CONFIG_BOARD_TYPE_COGLET
+    return "Coglet (XIAO ESP32-S3 Sense)";
 #elif CONFIG_BOARD_TYPE_XIAO_ESP32S3_SENSE
     return "XIAO ESP32-S3 Sense";
 #elif CONFIG_BOARD_TYPE_XIAO_ESP32S3_EYES
@@ -132,7 +134,14 @@ static void XiaoServerHistoryAdd(const std::string& url) {
     s.SetString("srv_hist", blob);
 }
 
+// Optional board-local extension; existing profiles retain their handler.
+#ifdef CONFIG_BOARD_TYPE_COGLET
+bool CogletSerialCommand(const char* line);
+#endif
 static void HandleXiaoSerialLine(const char* buf) {
+#ifdef CONFIG_BOARD_TYPE_COGLET
+    if (CogletSerialCommand(buf)) return;
+#endif
     auto& ssid_manager = SsidManager::GetInstance();
 
     // --- !wifi ---
@@ -428,6 +437,10 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !speaker status      -- show speaker volume and output state\r\n");
         printf("  !reboot              -- reboot the device\r\n");
         printf("  !stop                -- stop listening / close active listening\r\n");
+#ifdef CONFIG_BOARD_TYPE_COGLET
+        printf("  !coglet state        -- robot diagnostics and calibration\r\n");
+        printf("  !coglet release      -- latch servo outputs off (not a power cut)\r\n");
+#endif
         printf("  !help                -- show this message\r\n");
         printf("  anything else        -- send as chat message\r\n\r\n");
         fflush(stdout);

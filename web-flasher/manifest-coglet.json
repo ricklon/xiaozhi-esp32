@@ -1,0 +1,32 @@
+{
+  "name": "XiaoZhi - coglet",
+  "version": "2.2.6",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "firmware/coglet/bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "firmware/coglet/partition-table.bin",
+          "offset": 32768
+        },
+        {
+          "path": "firmware/coglet/ota_data_initial.bin",
+          "offset": 53248
+        },
+        {
+          "path": "firmware/coglet/xiaozhi.bin",
+          "offset": 131072
+        },
+        {
+          "path": "firmware/coglet/generated_assets.bin",
+          "offset": 6291456
+        }
+      ]
+    }
+  ]
+}

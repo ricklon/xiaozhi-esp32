@@ -161,6 +161,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_XIAO_ESP32C6_EYES
         bool "Seeed XIAO ESP32-C6 Eye Servo Breakout"
         depends on IDF_TARGET_ESP32C6
+    config BOARD_TYPE_COGLET
+        bool "Coglet (XIAO ESP32-S3 Sense robot)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_XIAO_ESP32S3_SENSE
         bool "Seeed XIAO ESP32-S3 Sense (with OV2640 camera)"
         depends on IDF_TARGET_ESP32S3
@@ -1005,3 +1008,18 @@ menu "TAIJIPAI_S3_CONFIG"
 endmenu
 
 endmenu
+
+if BOARD_TYPE_COGLET
+choice COGLET_CAMERA_MODEL
+    prompt "Coglet fitted camera (confirm module marking first)"
+    default COGLET_CAMERA_UNCONFIRMED
+config COGLET_CAMERA_UNCONFIRMED
+    bool "Unconfirmed: camera disabled"
+config COGLET_CAMERA_OV2640
+    bool "Confirmed OV2640"
+config COGLET_CAMERA_OV3660
+    bool "Confirmed OV3660"
+config COGLET_CAMERA_OV5640
+    bool "Confirmed OV5640"
+endchoice
+endif

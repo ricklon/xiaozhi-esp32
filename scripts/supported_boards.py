@@ -53,6 +53,14 @@ SUPPORTED_BOARDS = [
         "include_assets": True,
     },
     {
+        "board": "coglet",
+        "name": "coglet",
+        "full_name": "coglet",
+        "flasher_board_id": "coglet",
+        "manifest": "manifest-coglet.json",
+        "include_assets": True,
+    },
+    {
         "board": "waveshare/esp32-s3-touch-amoled-1.8",
         "name": "esp32-s3-touch-amoled-1.8",
         "full_name": "waveshare-esp32-s3-touch-amoled-1.8",
