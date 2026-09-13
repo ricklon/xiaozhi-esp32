@@ -267,6 +267,10 @@ elseif(CONFIG_BOARD_TYPE_COGLET)
     set(BOARD_TYPE "coglet")
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
+elseif(CONFIG_BOARD_TYPE_COGLET_C3)
+    set(BOARD_TYPE "coglet-c3")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
+    set(BUILTIN_ICON_FONT font_awesome_14_1)
 elseif(CONFIG_BOARD_TYPE_XIAO_ESP32S3_SENSE)
     set(BOARD_TYPE "xiao-esp32-s3-sense")
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
@@ -879,6 +883,19 @@ else()
     )
 endif()
 list(APPEND SOURCES ${BOARD_SOURCES})
+
+# The selected board's directory is on the include path so shared board code
+# (e.g. boards/common/coglet_controller.cc) resolves that board's config.h.
+if(MANUFACTURER)
+    list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${MANUFACTURER}/${BOARD_TYPE})
+else()
+    list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})
+endif()
+
+# Coglet servo controller is shared by the ESP32-S3 and ESP32-C3 profiles.
+if(CONFIG_BOARD_TYPE_COGLET OR CONFIG_BOARD_TYPE_COGLET_C3)
+    list(APPEND SOURCES "boards/common/coglet_controller.cc")
+endif()
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)

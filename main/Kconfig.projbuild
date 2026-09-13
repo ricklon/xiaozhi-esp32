@@ -164,6 +164,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_COGLET
         bool "Coglet (XIAO ESP32-S3 Sense robot)"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_COGLET_C3
+        bool "Coglet C3 (XIAO ESP32-C3 robot, no camera)"
+        depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_XIAO_ESP32S3_SENSE
         bool "Seeed XIAO ESP32-S3 Sense (with OV2640 camera)"
         depends on IDF_TARGET_ESP32S3

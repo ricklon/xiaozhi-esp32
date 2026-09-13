@@ -18,9 +18,10 @@
 # Environment:
 #   PORT=<dev>   Serial port override (default: auto-detect /dev/ttyACM0)
 #   AGENT_HUB_PUBLIC_HOST=<host>
-#                Agent Hub Funnel host for df-k10
+#                Agent Hub public host for df-k10 and coglet-c3
+#                (e.g. hub.foofab.net for the droplet)
 #   AGENT_HUB_SERVER_ENROLLMENT_TOKEN=<token>
-#                Agent Hub enrollment token embedded in df-k10 firmware
+#                Agent Hub enrollment token embedded in df-k10/coglet-c3 firmware
 #   AGENT_HUB_ENV_FILE=<path>
 #                dotenv fallback (default: ../agent-hub/.env when present)
 #   WIFI_SSID=<ssid>  WIFI_PASSWORD=<pass>
@@ -166,10 +167,11 @@ merge_defaults() {
         [ -f "$(board_dir "$board")/sdkconfig.defaults" ]  && cat "$(board_dir "$board")/sdkconfig.defaults"
     } > "$outfile"
 
-    # The K10 enrolls through Agent Hub's public HTTPS Funnel. Keep the secret
-    # out of tracked defaults while allowing the same value used by Agent Hub's
-    # .env to be injected into the firmware. The generated cache is gitignored.
-    if [ "$board" = "df-k10" ]; then
+    # The K10 and Coglet C3 enroll through Agent Hub's public HTTPS host. Keep
+    # the secret out of tracked defaults while allowing the same value used by
+    # Agent Hub's .env to be injected into the firmware. The generated cache is
+    # gitignored.
+    if [ "$board" = "df-k10" ] || [ "$board" = "coglet-c3" ]; then
         local agent_hub_env agent_hub_host agent_hub_token dotenv_key dotenv_value
         agent_hub_env="${AGENT_HUB_ENV_FILE:-../agent-hub/.env}"
         agent_hub_host="${AGENT_HUB_PUBLIC_HOST:-}"

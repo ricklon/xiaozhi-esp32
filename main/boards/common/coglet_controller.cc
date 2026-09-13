@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <cstring>
+#include <cstdio>
 
 namespace {
 constexpr const char* names[] = {"base", "tilt", "lid_left", "lid_right", "mouth", "ears"};
@@ -111,23 +112,29 @@ esp_err_t CogletController::Probe() {
     return e;
 }
 esp_err_t CogletController::InitHardware() {
+    // Name the failing step: "PCA init: ESP_ERR_INVALID_STATE" alone cannot
+    // distinguish a busy I2C port from a servo board that never answers.
+    auto step = [](const char* what, esp_err_t err) {
+        if (err != ESP_OK) ESP_LOGE("Coglet", "PCA init %s: %s", what, esp_err_to_name(err));
+        return err;
+    };
     // Assert OE BEFORE configuring the output direction; external pull-up is
     // required for the reset window. Existing Eyemech OE may be UNWIRED.
-    auto e = gpio_set_level(SERVO_OE_PIN, 1);
+    auto e = step("oe_level", gpio_set_level(SERVO_OE_PIN, 1));
     if (e != ESP_OK) return e;
-    if ((e = gpio_set_direction(SERVO_OE_PIN, GPIO_MODE_OUTPUT)) != ESP_OK) return e;
+    if ((e = step("oe_dir", gpio_set_direction(SERVO_OE_PIN, GPIO_MODE_OUTPUT))) != ESP_OK) return e;
     i2c_master_bus_config_t bus = {};
     bus.i2c_port = SERVO_I2C_PORT;
     bus.sda_io_num = SERVO_I2C_SDA_PIN; bus.scl_io_num = SERVO_I2C_SCL_PIN;
     bus.clk_source = I2C_CLK_SRC_DEFAULT; bus.glitch_ignore_cnt = 7;
     bus.flags.enable_internal_pullup = true;
-    if ((e = i2c_new_master_bus(&bus, &bus_)) != ESP_OK) return e;
+    if ((e = step("new_bus", i2c_new_master_bus(&bus, &bus_))) != ESP_OK) return e;
     i2c_device_config_t dev = {};
     dev.dev_addr_length = I2C_ADDR_BIT_LEN_7; dev.device_address = SERVO_PCA9685_ADDR;
     dev.scl_speed_hz = 100000;
-    if ((e = i2c_master_bus_add_device(bus_, &dev, &device_)) != ESP_OK) return e;
+    if ((e = step("add_device", i2c_master_bus_add_device(bus_, &dev, &device_))) != ESP_OK) return e;
     // Full-off ALL outputs before waking/reprogramming a warm PCA9685.
-    if ((e = Release()) != ESP_OK) return e;
+    if ((e = step("release", Release())) != ESP_OK) return e;
     if ((e = Register(0, 0x30)) != ESP_OK) return e; // sleep + auto-increment
     if ((e = Register(0xfe, 121)) != ESP_OK) return e; // nominal 25 MHz, ~50 Hz
     if ((e = Register(1, 4)) != ESP_OK) return e;
@@ -285,6 +292,46 @@ std::string CogletController::Command(const std::string& text, bool local) {
     if (verb == "release") {
         if (!end()) check(ESP_ERR_INVALID_ARG);
         check(Release()); return Json(State());
+    }
+    // Local diagnostic: who is actually on the servo I2C bus? A PCA9685 that
+    // does not answer at SERVO_PCA9685_ADDR is either unpowered, on different
+    // pins, or strapped to another address; only a sweep tells them apart.
+    if (verb == "scan") {
+        if (!local) check(ESP_ERR_INVALID_ARG);
+        // Optional pin override, so a suspected SDA/SCL swap or a harness on
+        // different pads can be ruled out without reflashing. This tears the
+        // servo bus down; the board stays released until the next reboot.
+        int sda = -1, scl = -1;
+        if (in >> sda) { if (!(in >> scl) || !end()) check(ESP_ERR_INVALID_ARG); }
+        if (sda >= 0) {
+            Release();
+            if (device_) { i2c_master_bus_rm_device(device_); device_ = nullptr; }
+            if (bus_) { i2c_del_master_bus(bus_); bus_ = nullptr; }
+            ready_ = false;
+            i2c_master_bus_config_t rescan = {};
+            rescan.i2c_port = SERVO_I2C_PORT;
+            rescan.sda_io_num = decltype(rescan.sda_io_num)(sda);
+            rescan.scl_io_num = decltype(rescan.scl_io_num)(scl);
+            rescan.clk_source = I2C_CLK_SRC_DEFAULT; rescan.glitch_ignore_cnt = 7;
+            rescan.flags.enable_internal_pullup = true;
+            check(i2c_new_master_bus(&rescan, &bus_));
+        }
+        if (!bus_) check(ESP_ERR_INVALID_STATE);
+        std::string found;
+        for (int addr = 0x08; addr <= 0x77; ++addr) {
+            if (i2c_master_probe(bus_, addr, 50) == ESP_OK) {
+                char hex[8];
+                snprintf(hex, sizeof(hex), "0x%02x", addr);
+                if (!found.empty()) found += ", ";
+                found += hex;
+            }
+        }
+        char pins[96];
+        snprintf(pins, sizeof(pins), "I2C port %d, SDA GPIO%d, SCL GPIO%d: ",
+                 (int)SERVO_I2C_PORT,
+                 sda >= 0 ? sda : (int)SERVO_I2C_SDA_PIN,
+                 sda >= 0 ? scl : (int)SERVO_I2C_SCL_PIN);
+        return std::string(pins) + (found.empty() ? "no devices responded" : found);
     }
     if (verb == "stop") {
         if (!end()) check(ESP_ERR_INVALID_ARG);

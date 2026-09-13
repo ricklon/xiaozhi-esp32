@@ -26,6 +26,10 @@ inline int i2c_master_transmit(void*,const uint8_t* p,size_t n,int) {
     fake_writes.emplace_back(p,p+n);return 0;
 }
 inline int i2c_master_transmit_receive(void*,const uint8_t*,size_t,uint8_t* out,size_t,int) {*out=0x20;return fake_probe_error;}
+// Only the PCA9685 answers, so a bus sweep reports exactly one address.
+inline int i2c_master_probe(void*,int addr,int) {return addr==0x40?0:-1;}
+inline int i2c_master_bus_rm_device(void*) {return 0;}
+inline int i2c_del_master_bus(void*) {return 0;}
 inline int gpio_set_level(int,int level) {fake_oe=level;return 0;}
 inline int gpio_set_direction(int,int) {return 0;}
 inline int64_t esp_timer_get_time() {return fake_now*1000;}

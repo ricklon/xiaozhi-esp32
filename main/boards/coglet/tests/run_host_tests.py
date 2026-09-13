@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 
 board = Path(__file__).resolve().parents[1]
+common = board.parent / 'common'
 idf = Path(os.environ.get('IDF_PATH', str(Path.home() / 'esp/esp-idf')))
 with tempfile.TemporaryDirectory(prefix='coglet-tests-') as temporary:
     tmp = Path(temporary)
@@ -20,8 +21,8 @@ with tempfile.TemporaryDirectory(prefix='coglet-tests-') as temporary:
     cjson = idf / 'components/json/cJSON'
     subprocess.run(['cc', '-c', str(cjson / 'cJSON.c'), '-I'+str(cjson), '-o', str(tmp/'cjson.o')], check=True)
     subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
-                    '-I'+str(tmp), '-I'+str(board), '-I'+str(cjson),
-                    str(board/'coglet_controller.cc'), str(board/'tests/test_controller.cc'),
+                    '-I'+str(tmp), '-I'+str(board), '-I'+str(common), '-I'+str(cjson),
+                    str(common/'coglet_controller.cc'), str(board/'tests/test_controller.cc'),
                     str(tmp/'cjson.o'), '-pthread', '-o', str(tmp/'test')], check=True)
     export = tmp / 'calibration.json'
     subprocess.run([str(tmp/'test'), str(export)], check=True)

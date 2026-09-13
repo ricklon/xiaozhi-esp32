@@ -1,0 +1,17 @@
+{
+    "manufacturer": "Coglet",
+    "target": "esp32c3",
+    "builds": [
+        {
+            "name": "coglet-c3",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_COGLET_C3=y",
+                "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/4m.csv\"",
+                "CONFIG_LANGUAGE_EN_US=y",
+                "CONFIG_OTA_URL=\"http://<your-ota-server>/xiaozhi/ota/\"",
+                "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y"
+            ]
+        }
+    ]
+}
