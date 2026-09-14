@@ -81,6 +81,24 @@ endpoints over serial (`!coglet ...`) or the MCP tools before anything moves:
 - `self.coglet.gaze`, `self.coglet.blink`, `self.coglet.animate`
 - `self.coglet.stop`, `self.coglet.release`, `self.coglet.state`
 
+## Listening
+
+There is no wake word, no on-device VAD and no AEC on the C3, so the default
+listening mode is auto-stop: the device streams the mic and agent-hub's VAD
+decides where each utterance ends. The mic is not sent while a reply plays, so
+the boot button is the only way to interrupt one. `InitializeAutoConnect()`
+reopens the session about 1 s after every drop to Idle, so the robot is
+effectively always listening.
+
+agent-hub **listen mode** needs no firmware support. Turn it on by saying
+"listen mode" or with the dashboard toggle, and off with "interact again". The
+hub still transcribes and logs each utterance but runs no LLM turn and no
+device tool, so the servos stay still. The robot only answers "Okay." The mode
+lives in hub memory per MAC, so it survives reboots but not a hub restart.
+
+The robot has no indicator for listen mode: the XIAO C3 has no user LED. An
+external LED is tracked in ricklon/xiaozhi-esp32#8.
+
 ## Host tests
 
 `main/boards/coglet/tests/run_host_tests.py` compiles the shared controller
