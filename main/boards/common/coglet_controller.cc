@@ -159,7 +159,7 @@ bool CogletController::Valid(const Calibration& cal, bool complete) const {
     if (cal.version != 1 || !Unit(cal.lid_trim) || !Unit(cal.upper_coeff)) return false;
     unsigned used = 0;
     for (const auto& a : cal.axes) {
-        if (a.confirmed > 1 || a.channel < -1 || a.channel > 5) return false;
+        if (a.confirmed > 1 || a.channel < -1 || a.channel > 15) return false;
         if (a.channel >= 0) {
             if (used & (1u << a.channel)) return false;
             used |= 1u << a.channel;
