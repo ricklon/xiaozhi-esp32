@@ -93,8 +93,11 @@ effectively always listening.
 agent-hub **listen mode** needs no firmware support. Turn it on by saying
 "listen mode" or with the dashboard toggle, and off with "interact again". The
 hub still transcribes and logs each utterance but runs no LLM turn and no
-device tool, so the servos stay still. The robot only answers "Okay." The mode
-lives in hub memory per MAC, so it survives reboots but not a hub restart.
+device tool, so the servos stay still. The robot speaks only when switching
+modes ("Listen mode. I'll stay quiet until you say interact again." / "Okay,
+I'm back.") and is silent in between. The mode lives in hub memory per MAC, so
+it survives reboots but not a hub restart. This ships in agent-hub PR #81
+(`feat/listen-mode`).
 
 The robot has no indicator for listen mode: the XIAO C3 has no user LED. An
 external LED is tracked in ricklon/xiaozhi-esp32#8.
