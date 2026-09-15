@@ -3,7 +3,8 @@
 The mechanism is built up one servo at a time, so every step here works on a
 partly wired robot. Nothing in this procedure requires the other roles to exist.
 
-Roles: `base`, `tilt`, `lid_left`, `lid_right`, `mouth`, `ears`.
+Roles: `base`, `tilt`, `lids`, `mouth`, `ears`. One servo drives both top
+lids, so there is a single `lids` axis and no per-eye roles.
 Endpoints are **semantic**, and may run numerically backwards:
 
 | Role | `low` means | `high` means |
@@ -83,9 +84,9 @@ Review `restore.txt` before applying it over serial. It releases, restores the
 mapping, saves and exports for comparison; it never engages. Only restore
 calibration measured for the same unchanged mechanism.
 
+Note `!coglet lids TRIM COEFF` (upper-lid coupling) is a different command
+from the `lids` **role** used by `configure`, `explore` and `confirm`.
+
 ## Still to do
 
-- The lid role model assumes two independent upper lids. The real mechanism has
-  **one servo for both top lids**, so the pair collapses to a single `lids`
-  role and `wink` degrades to a blink. Not yet implemented.
 - Voice-guided calibration, where the robot walks you through this by talking.

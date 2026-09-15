@@ -17,65 +17,67 @@
 #include <cstdio>
 
 namespace {
-constexpr const char* names[] = {"base", "tilt", "lid_left", "lid_right", "mouth", "ears"};
-struct Frame { float lr, ud, lid_l, lid_r; int ms; };
+constexpr const char* names[] = {"base", "tilt", "lids", "mouth", "ears"};
+struct Frame { float lr, ud, lid; int ms; };
 static const Frame s_frames_look[] = {
-    { 0.50f, 0.50f, 1.00f, 1.00f, 400 },   /* open, centred             */
-    { 0.00f, NAN,   NAN,   NAN,   700 },   /* look left                 */
-    { 1.00f, NAN,   NAN,   NAN,  1100 },   /* sweep across to the right */
-    { 0.50f, NAN,   NAN,   NAN,   600 },   /* back to centre            */
-    { NAN,   NAN,   0.00f, 0.00f, 400 },   /* close                     */
+    { 0.50f, 0.50f, 1.00f, 400 },   /* open, centred             */
+    { 0.00f, NAN,   NAN, 700 },   /* look left                 */
+    { 1.00f, NAN, NAN, 1100 },   /* sweep across to the right */
+    { 0.50f, NAN,   NAN, 600 },   /* back to centre            */
+    { NAN,   NAN,   0.00f, 400 },   /* close                     */
 };
 
 /* A circle in gaze space. Lids left to the coupling throughout, so the eyes
  * hood through the bottom and widen over the top — that is most of what makes
  * it read as a roll rather than a mechanical sweep. */
 static const Frame s_frames_roll[] = {
-    { 0.50f, 0.50f, 1.00f, 1.00f, 500 },   /* open, centred   */
-    { 0.50f, 0.92f, NAN,   NAN,   500 },   /* up              */
-    { 0.80f, 0.80f, NAN,   NAN,   350 },
-    { 0.92f, 0.50f, NAN,   NAN,   350 },   /* right           */
-    { 0.80f, 0.20f, NAN,   NAN,   350 },
-    { 0.50f, 0.08f, NAN,   NAN,   350 },   /* down            */
-    { 0.20f, 0.20f, NAN,   NAN,   350 },
-    { 0.08f, 0.50f, NAN,   NAN,   350 },   /* left            */
-    { 0.20f, 0.80f, NAN,   NAN,   350 },
-    { 0.50f, 0.92f, NAN,   NAN,   350 },   /* back to the top */
-    { 0.50f, 0.50f, NAN,   NAN,   600 },   /* settle centred  */
+    { 0.50f, 0.50f, 1.00f, 500 },   /* open, centred   */
+    { 0.50f, 0.92f, NAN, 500 },   /* up              */
+    { 0.80f, 0.80f, NAN, 350 },
+    { 0.92f, 0.50f, NAN, 350 },   /* right           */
+    { 0.80f, 0.20f, NAN, 350 },
+    { 0.50f, 0.08f, NAN, 350 },   /* down            */
+    { 0.20f, 0.20f, NAN, 350 },
+    { 0.08f, 0.50f, NAN, 350 },   /* left            */
+    { 0.20f, 0.80f, NAN, 350 },
+    { 0.50f, 0.92f, NAN, 350 },   /* back to the top */
+    { 0.50f, 0.50f, NAN, 600 },   /* settle centred  */
 };
 
 /* Suspicion. The snap across is quick, the lids narrow to a slit, and then it
  * HOLDS — the hold is the whole emote. Coming back is slower than going. */
 static const Frame s_frames_side_eye[] = {
-    { 0.50f, 0.50f, 0.90f, 0.90f, 300 },
-    { 0.12f, 0.56f, 0.45f, 0.45f, 350 },   /* dart across, lids narrow */
-    { 0.12f, 0.56f, 0.45f, 0.45f,1300 },   /* hold the look            */
-    { 0.50f, 0.50f, 0.90f, 0.90f, 550 },   /* unhurried return         */
+    { 0.50f, 0.50f, 0.90f, 300 },
+    { 0.12f, 0.56f, 0.45f, 350 },   /* dart across, lids narrow */
+    { 0.12f, 0.56f, 0.45f, 1300 },   /* hold the look            */
+    { 0.50f, 0.50f, 0.90f, 550 },   /* unhurried return         */
 };
 
-/* Only possible because the lids are per-eye while the gaze is shared. */
+/* Written for per-eye lids. This mechanism has one servo for both top lids,
+ * so the shut-one-eye track drives that single servo and wink reads as a
+ * slower, held blink. */
 static const Frame s_frames_wink[] = {
-    { 0.50f, 0.50f, 0.95f, 0.95f, 300 },   /* both open        */
-    { NAN,   NAN,   0.00f, 0.95f, 170 },   /* left shuts, fast */
-    { NAN,   NAN,   0.00f, 0.95f, 200 },   /* held shut        */
-    { NAN,   NAN,   0.95f, 0.95f, 260 },   /* and back         */
+    { 0.50f, 0.50f, 0.95f, 300 },   /* open            */
+    { NAN,   NAN,   0.00f, 170 },   /* lids shut, fast */
+    { NAN,   NAN,   0.00f, 200 },   /* held shut       */
+    { NAN,   NAN,   0.95f, 260 },   /* and back        */
 };
 
 /* Fast attack, long hold, slow release — the shape of a startle. */
 static const Frame s_frames_surprise[] = {
-    { 0.50f, 0.50f, 0.55f, 0.55f, 250 },   /* half-lidded first, for contrast */
-    { 0.50f, 0.70f, 1.00f, 1.00f, 110 },   /* snap wide, gaze lifts           */
-    { 0.50f, 0.70f, 1.00f, 1.00f, 950 },   /* hold                            */
-    { 0.50f, 0.50f, 0.85f, 0.85f, 800 },   /* settle back down                */
+    { 0.50f, 0.50f, 0.55f, 250 },   /* half-lidded first, for contrast */
+    { 0.50f, 0.70f, 1.00f, 110 },   /* snap wide, gaze lifts           */
+    { 0.50f, 0.70f, 1.00f, 950 },   /* hold                            */
+    { 0.50f, 0.50f, 0.85f, 800 },   /* settle back down                */
 };
 
 /* Everything slow. Heaviness is pace, not position. */
 static const Frame s_frames_sleepy[] = {
-    { 0.50f, 0.50f, 0.85f, 0.85f, 600 },
-    { 0.47f, 0.35f, 0.35f, 0.35f,1500 },   /* lids droop, gaze sinks */
-    { 0.46f, 0.30f, 0.00f, 0.00f, 900 },   /* slow close             */
-    { 0.46f, 0.30f, 0.00f, 0.00f, 800 },   /* stays shut a beat      */
-    { 0.50f, 0.44f, 0.55f, 0.55f,1200 },   /* half open, still heavy */
+    { 0.50f, 0.50f, 0.85f, 600 },
+    { 0.47f, 0.35f, 0.35f, 1500 },   /* lids droop, gaze sinks */
+    { 0.46f, 0.30f, 0.00f, 900 },   /* slow close             */
+    { 0.46f, 0.30f, 0.00f, 800 },   /* stays shut a beat      */
+    { 0.50f, 0.44f, 0.55f, 1200 },   /* half open, still heavy */
 };
 
 
@@ -86,7 +88,7 @@ const Animation animations[] = {ANIM(look), ANIM(roll), ANIM(side_eye), ANIM(win
 int64_t Now() { return esp_timer_get_time()/1000; }
 int64_t BlinkTime(int64_t now) { return now + 2000 + esp_random()%5001; }
 int AxisIndex(const std::string& name) {
-    for (int i=0; i<6; ++i) if (name == names[i]) return i;
+    for (int i=0; i<5; ++i) if (name == names[i]) return i;
     return -1;
 }
 bool Unit(float v) { return std::isfinite(v) && v >= 0 && v <= 1; }
@@ -156,9 +158,9 @@ esp_err_t CogletController::Fail(esp_err_t error) {
     return error;
 }
 bool CogletController::Valid(const Calibration& cal, bool complete) const {
-    if (cal.version != 1 || !Unit(cal.lid_trim) || !Unit(cal.upper_coeff)) return false;
+    if (cal.version != 2 || !Unit(cal.lid_trim) || !Unit(cal.upper_coeff)) return false;
     unsigned used = 0;
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 5; ++i) {
         const auto& a = cal.axes[i];
         if (a.confirmed > 1 || a.channel < -1 || a.channel > 15) return false;
         if (a.channel >= 0) {
@@ -185,7 +187,7 @@ void CogletController::Load() {
     if (nvs_open("coglet", NVS_READONLY, &h) != ESP_OK) return;
     Calibration candidate;
     size_t size = sizeof(candidate);
-    auto e = nvs_get_blob(h, "cal_v1", &candidate, &size);
+    auto e = nvs_get_blob(h, "cal_v2", &candidate, &size);
     nvs_close(h);
     if (e == ESP_OK && size == sizeof(candidate) && Valid(candidate, false)) cal_ = candidate;
 }
@@ -193,13 +195,13 @@ esp_err_t CogletController::Save() {
     nvs_handle_t h;
     auto e = nvs_open("coglet", NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
-    e = nvs_set_blob(h, "cal_v1", &cal_, sizeof(cal_));
+    e = nvs_set_blob(h, "cal_v2", &cal_, sizeof(cal_));
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h); return e;
 }
 esp_err_t CogletController::Write(int axis, float degrees) {
     if (released_ || !ready_) return ESP_ERR_INVALID_STATE;
-    if (axis < 0 || axis >= 6 || !std::isfinite(degrees)) return ESP_ERR_INVALID_ARG;
+    if (axis < 0 || axis >= 5 || !std::isfinite(degrees)) return ESP_ERR_INVALID_ARG;
     const auto& a = cal_.axes[axis];
     if (a.channel < 0 || degrees < std::min(a.low,a.high) || degrees > std::max(a.low,a.high)) return ESP_ERR_INVALID_ARG;
     if (commanded_[axis] == degrees) return ESP_OK;
@@ -223,14 +225,13 @@ esp_err_t CogletController::Pulse(int channel, float us) {
 float CogletController::Micros(const Axis& a, float degrees) const {
     return a.min_us + (a.max_us-a.min_us)*degrees/180.f + a.trim_us;
 }
-esp_err_t CogletController::Apply(const std::array<float,4>& pose) {
+esp_err_t CogletController::Apply(const std::array<float,3>& pose) {
     auto target = pose;
     // Eyemech upper-lid tracking: trim scales measured open end, then hood
     // by 0.8 * (1 - normalized vertical gaze). Coglet has no lower eyelids.
     float coupled = (0.5f + 0.5f*cal_.lid_trim)*(1.f-cal_.upper_coeff*(1.f-pose[1]));
     if (std::isnan(target[2])) target[2] = coupled;
-    if (std::isnan(target[3])) target[3] = coupled;
-    for (int i=0; i<4; ++i) {
+    for (int i=0; i<3; ++i) {
         const auto& a=cal_.axes[i];
         if (a.channel < 0) continue; // role not fitted on this mechanism
         auto e = Write(i, a.low+(a.high-a.low)*target[i]);
@@ -246,9 +247,9 @@ esp_err_t CogletController::Tick(int64_t now) {
     if (animation_ >= 0) {
         const auto& a=animations[animation_]; const auto& f=a.frames[frame_];
         float k=std::min(1.f, float(now-frame_start_)/f.ms);
-        float dest[]={f.lr,f.ud,f.lid_l,f.lid_r};
+        float dest[]={f.lr,f.ud,f.lid};
         auto next=pose_;
-        for (int i=0;i<4;++i) {
+        for (int i=0;i<3;++i) {
             if (std::isnan(dest[i])) { if (i>=2) next[i]=NAN; }
             else next[i]=std::isnan(from_[i]) ? dest[i] : from_[i]+(dest[i]-from_[i])*k;
         }
@@ -262,7 +263,7 @@ esp_err_t CogletController::Tick(int64_t now) {
         if ((e=Apply(pose_)) != ESP_OK) return e;
         blink_until_=0; next_blink_=BlinkTime(now+70);
     } else if (!blink_until_ && now>=next_blink_) {
-        auto closed=pose_; closed[2]=closed[3]=0;
+        auto closed=pose_; closed[2]=0;
         if ((e=Apply(closed)) != ESP_OK) return e;
         blink_until_=now+70;
     }
@@ -288,7 +289,7 @@ cJSON* CogletController::State() {
     cJSON_AddNumberToObject(root,"lid_trim",cal_.lid_trim);
     cJSON_AddNumberToObject(root,"upper_coeff",cal_.upper_coeff);
     auto* axes=cJSON_AddArrayToObject(root,"axes");
-    for (int i=0;i<6;++i) {
+    for (int i=0;i<5;++i) {
         auto* v=cJSON_CreateObject(); const auto& a=cal_.axes[i];
         cJSON_AddStringToObject(v,"role",names[i]); cJSON_AddNumberToObject(v,"channel",a.channel);
         cJSON_AddNumberToObject(v,"low",a.low); cJSON_AddNumberToObject(v,"high",a.high);
@@ -362,12 +363,12 @@ std::string CogletController::Command(const std::string& text, bool local) {
     if (verb == "stop") {
         if (!end()) check(ESP_ERR_INVALID_ARG);
         // Freeze the successful commanded pose, including lids, mid-animation.
-        for (int i=0;i<4;++i) if (std::isfinite(commanded_[i]) && cal_.axes[i].low != cal_.axes[i].high) {
+        for (int i=0;i<3;++i) if (std::isfinite(commanded_[i]) && cal_.axes[i].low != cal_.axes[i].high) {
             const auto& a=cal_.axes[i]; pose_[i]=(commanded_[i]-a.low)/(a.high-a.low);
         }
         animation_=-1; blink_until_=0; next_blink_=BlinkTime(Now()+900);
-        if (cal_.axes[2].channel<0 && cal_.axes[3].channel<0) next_blink_=INT64_MAX;
-        for (int i=0;i<4;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) next_blink_=INT64_MAX;
+        if (cal_.axes[2].channel<0) next_blink_=INT64_MAX;
+        for (int i=0;i<3;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) next_blink_=INT64_MAX;
         hardware(Probe()); return Json(State());
     }
     if (verb == "engage" || verb == "builder") {
@@ -489,18 +490,18 @@ std::string CogletController::Command(const std::string& text, bool local) {
     if (verb == "gaze") {
         float x,y;
         if (!(in>>x>>y) || !end() || !std::isfinite(x) || !std::isfinite(y) || x< -100 || x>100 || y< -100 || y>100) check(ESP_ERR_INVALID_ARG);
-        std::array<float,4> next={(x+100)/200,(y+100)/200,NAN,NAN};
+        std::array<float,3> next={(x+100)/200,(y+100)/200,NAN};
         hardware(Probe()); hardware(Apply(next)); pose_=next;
         animation_=-1; blink_until_=0;
-        next_blink_=(cal_.axes[2].channel>=0 || cal_.axes[3].channel>=0) ? BlinkTime(Now()) : INT64_MAX;
+        next_blink_=cal_.axes[2].channel>=0 ? BlinkTime(Now()) : INT64_MAX;
     } else if (verb == "blink") {
         if (!end()) check(ESP_ERR_INVALID_ARG);
         if (animation_>=0 || blink_until_) check(ESP_ERR_INVALID_STATE);
         // No lid servo fitted, nothing to blink with.
-        if (cal_.axes[2].channel<0 && cal_.axes[3].channel<0) check(ESP_ERR_NOT_SUPPORTED);
+        if (cal_.axes[2].channel<0) check(ESP_ERR_NOT_SUPPORTED);
         // Blink only after a gaze/animation has established a commanded pose.
-        for (int i=0;i<4;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) check(ESP_ERR_INVALID_STATE);
-        auto closed=pose_; closed[2]=closed[3]=0;
+        for (int i=0;i<3;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) check(ESP_ERR_INVALID_STATE);
+        auto closed=pose_; closed[2]=0;
         hardware(Probe()); hardware(Apply(closed)); blink_until_=Now()+70;
     } else {
         std::string name; if (!(in>>name) || !end()) check(ESP_ERR_INVALID_ARG);
@@ -547,7 +548,7 @@ esp_err_t CogletController::Http(httpd_req_t* req) {
         return httpd_resp_sendstr(req,R"HTML(<!doctype html><meta name="viewport" content="width=device-width"><title>Coglet builder</title>
 <h1>Coglet builder controls</h1><p>Servos have no position feedback. Keep a hand on the servo-power switch.</p>
 <p>Commands: state, export, release, builder, engage, servo ROLE DEGREES, jog ROLE DELTA, gaze X Y, blink, animate NAME, stop, save.</p>
-<p>Configure while released: configure ROLE CHANNEL LOW HIGH MIN_US MAX_US TRIM_US CONFIRMED. Roles: base tilt lid_left lid_right mouth ears. Confirmed: 0 or 1.</p>
+<p>Configure while released: configure ROLE CHANNEL LOW HIGH MIN_US MAX_US TRIM_US CONFIRMED. Roles: base tilt lids mouth ears. Confirmed: 0 or 1.</p>
 <form id="form"><input id="command" size="65" value="state"><button>Run</button></form>
 <button onclick="run('release')">Release outputs</button> <button onclick="run('state')">State</button>
 <pre id="result"></pre><script>

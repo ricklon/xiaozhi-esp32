@@ -1,6 +1,6 @@
 # Coglet C3 — XIAO ESP32-C3
 
-The Coglet mechanism (PCA9685 six-channel servo controller, external I²S mic and
+The Coglet mechanism (PCA9685 servo controller, external I²S mic and
 amp) on a Seeed XIAO ESP32-C3 instead of the XIAO ESP32-S3 Sense. Firmware is
 the same Xiaozhi voice agent plus the same `CogletController` — the controller
 now lives in `main/boards/common/coglet_controller.cc` and is compiled for
@@ -75,8 +75,11 @@ USB port at 115200 baud once `XiaoSerialInputTask` installs the VFS driver.
 
 ## Servo provisioning
 
-Every boot starts released with all six roles unassigned. Provision channels and
-endpoints over serial (`!coglet ...`) or the MCP tools before anything moves:
+Every boot starts released with all five roles unassigned. Provision channels
+and endpoints over serial (`!coglet ...`) or the MCP tools before anything moves.
+Servos are fitted one at a time, so a partly built mechanism is supported: gaze
+needs base and tilt, and unassigned roles are skipped. See
+`docs/coglet-calibration.md` for the per-servo procedure:
 
 - `self.coglet.gaze`, `self.coglet.blink`, `self.coglet.animate`
 - `self.coglet.stop`, `self.coglet.release`, `self.coglet.state`

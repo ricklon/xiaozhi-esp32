@@ -21,10 +21,9 @@ pad names differ between the two XIAO boards.
                  |                           |         |
                  |  (S3 only) DVP camera     |         +--> ch0 base     servo
                  +---------------------------+         +--> ch1 tilt     servo
-                                                       +--> ch2 lid_left
-     servo supply (switched, 4.8-6 V) --> PCA V+ ------+--> ch3 lid_right
-     common ground with the XIAO                       +--> ch4 mouth
-                                                       +--> ch5 ears
+                                                       +--> ch2 lids
+     servo supply (switched, 4.8-6 V) --> PCA V+ ------+--> ch3 mouth
+     common ground with the XIAO                       +--> ch4 ears
 ```
 
 Logic and servo power are separate. PCA9685 logic VCC is 3.3 V from the XIAO;
@@ -40,7 +39,7 @@ servo current from the XIAO regulator or the USB 3.3 V rail.
 | INMP441 | I2S microphone | 3.3 V, L/R pin selects the I2S slot |
 | MAX98357A | I2S class-D amp | 5 V, SD pin sets gain and shutdown |
 | PCA9685 breakout | 16-channel servo PWM | address 0x40, 100 kHz I2C, ~50 Hz output |
-| Hobby servos x6 | base, tilt, 2 lids, mouth, ears | model not yet recorded — see Unknowns |
+| Hobby servos x5 | base, tilt, lids (one servo, both top lids), mouth, ears | model not yet recorded — see Unknowns |
 | Servo supply | switched V+ for PCA | sized for the fitted servos; physical switch is the emergency stop |
 | Camera (S3 only) | OV2640 / OV3660 / OV5640 | select in menuconfig; disabled until confirmed |
 
@@ -119,5 +118,5 @@ the bus down, so reboot afterwards.
 3. **Channel assignment** for lids, mouth and ears. Only base (ch0) and tilt
    (ch1) are mapped today.
 4. **Is /OE wired** on this breakout, and is it pulled up or down?
-5. **Ears**: one shared servo or two independent? The six-role model assumes one.
+5. **Ears**: one shared servo or two independent? The role model assumes one.
 6. **Camera module marking** on the S3 unit (OV2640 / OV3660 / OV5640).

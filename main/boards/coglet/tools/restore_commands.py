@@ -8,13 +8,13 @@ import math
 import sys
 from pathlib import Path
 
-roles = ('base', 'tilt', 'lid_left', 'lid_right', 'mouth', 'ears')
+roles = ('base', 'tilt', 'lids', 'mouth', 'ears')
 data = json.loads(Path(sys.argv[1]).read_text())
-if data.get('calibration_version') != 1:
-    raise SystemExit('Expected Coglet calibration_version 1; no Eyemech import')
+if data.get('calibration_version') != 2:
+    raise SystemExit('Expected Coglet calibration_version 2; no Eyemech import')
 axes = data['axes']
-if len(axes) != 6 or {a['role'] for a in axes} != set(roles):
-    raise SystemExit('Expected all six Coglet roles exactly once')
+if len(axes) != 5 or {a['role'] for a in axes} != set(roles):
+    raise SystemExit('Expected all five Coglet roles exactly once')
 commands = ['!coglet release']
 for role in roles:
     commands.append(f'!coglet configure {role} -1 90 90 1000 2000 0 0')
@@ -26,7 +26,7 @@ for a in axes:
     channel, low, high, min_us, max_us, trim = values
     if any(type(v) is not int for v in (channel, min_us, max_us, trim)):
         raise SystemExit('Channel and pulse fields must be integers')
-    if not (-1 <= channel <= 5 and 0 <= low <= 180 and 0 <= high <= 180
+    if not (-1 <= channel <= 15 and 0 <= low <= 180 and 0 <= high <= 180
             and 300 <= min_us < max_us <= 3000
             and 300 <= min_us + trim < max_us + trim <= 3000):
         raise SystemExit('Calibration bounds invalid')

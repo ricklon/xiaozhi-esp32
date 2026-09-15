@@ -1,7 +1,7 @@
 # Coglet — XIAO ESP32-S3 Sense
 
-This profile combines Xiaozhi audio, camera and native MCP with a six-channel
-Coglet controller adapted from `../eyemech-esp32-xiao`. Existing Sense and Eyes
+This profile combines Xiaozhi audio, camera and native MCP with a five-role
+Coglet servo controller adapted from `../eyemech-esp32-xiao`. Existing Sense and Eyes
 profiles are unchanged. **No flashing, board identification, calibration export
 from a connected board, or physical qualification was performed during development.**
 
@@ -48,16 +48,17 @@ cannot guarantee a motion-free reset with unwired /OE and retained PCA pulses.
 
 ## Coglet mapping and motion adaptation
 
-Logical roles are `base`, `tilt`, `lid_left`, `lid_right`, `mouth`, `ears`.
+Logical roles are `base`, `tilt`, `lids`, `mouth`, `ears`.
 Provision each with a unique PCA channel 0–5; defaults are **-1 (unassigned)**.
-This six-role model assumes two independent upper eyelids and one mechanically
-shared ears servo. Confirm that arrangement and the actual plug mapping before
+This five-role model assumes **one servo driving both top lids** (confirmed on
+the built mechanism, 2026-09-15) and one mechanically shared ears servo. There
+are no lower lids and no per-eye lid roles. Confirm that arrangement and the actual plug mapping before
 provisioning. If the ears are independent or the lids share a servo, change the
 role model before driving; do not assign duplicate channels to simulate coupling.
 
 The old Eyemech assignment was 0=LR, 1=UD, 2=TL, 3=BL, 4=TR, 5=BR. **Do not copy
 that assignment or its measured angles to Coglet.** Gaze maps to base/tilt, blink
-and wink use only the two upper lids, and mouth/ears are available for individual
+and wink use only the shared lid axis, and mouth/ears are available for individual
 builder tests. They remain released during conversational gaze and expressions;
 no lower-lid command is repurposed as a mouth or ears command.
 
@@ -101,7 +102,7 @@ reset the MCU. Do not flash until the owner has verified the backup and power
 state. No commands below authorize operating an unidentified attached board.
 
 From the existing Eyemech firmware, capture `!status` and the browser
-`GET /api/state` output to files. Record all six endpoints, per-axis min/max pulse,
+`GET /api/state` output to files. Record all five endpoints, per-axis min/max pulse,
 angle range, trim_us, lid_trim, lid_coeff and safeboot. Its measured values reside
 in NVS namespace `eyemech`, blob `servo_cal_v1`, with separate `lid_trim`,
 `lid_coeff`, `safeboot` keys; compiled defaults are different.
@@ -172,7 +173,12 @@ Robot commands use the distinct `!coglet` prefix:
 | `!coglet builder` | Clear release for isolated servo tests; no automatic movement |
 | `!coglet servo ROLE DEGREES` | Builder only, within configured bounds |
 | `!coglet jog ROLE DELTA` | Builder only, at most ±5°, requires known commanded angle |
-| `!coglet engage` | Require all six roles confirmed; leave all outputs off until requested |
+| `!coglet identify CH` | Builder only; wiggle a raw channel to find which servo is on it |
+| `!coglet explore ROLE` | Builder only; centre at 1500 us and hunt endpoints outside the window |
+| `!coglet nudge DELTA` | Builder only; at most ±5°, clamped to the hard 1000-2000 us bound |
+| `!coglet mark low\|high` | Record the explored position as that semantic endpoint; clears confirmed |
+| `!coglet confirm ROLE` | Mark a role as watched at both endpoints |
+| `!coglet engage` | Require base and tilt confirmed, and every *assigned* role confirmed; unassigned roles are skipped |
 | `!coglet gaze X Y` | Normal mode, -100…100 mapped to calibrated base/tilt endpoints |
 | `!coglet blink` | One timed blink after an established gaze; refused during animation |
 | `!coglet animate NAME` | One named expression |
@@ -265,7 +271,7 @@ or mocked test is an automated check, **not** physical evidence.
    >10 seconds to verify auto-blink cannot reenergize anything. Use the physical
    rail switch immediately if binding or buzzing occurs.
 7. **MCP discovery/calls:** on Hub's normal voice session, capture check-in and
-   MCP handshake logs; verify all six Coglet tools and absence of engage/raw
+   MCP handshake logs; verify all six Coglet MCP tools and absence of engage/raw
    calibration tools. Call state and release first. While released, gaze/blink/
    animations must error. After local engagement test valid calls and invalid
    bounds/names. With V+ off and logic powered, disconnect PCA I²C for a missing

@@ -24,8 +24,9 @@ private:
         uint32_t confirmed = 0;
     };
     struct Calibration {
-        uint32_t version = 1;
-        std::array<Axis, 6> axes;
+        // v2 collapsed the lid_left/lid_right pair into one shared lids axis.
+        uint32_t version = 2;
+        std::array<Axis, 5> axes;
         float lid_trim = .85f;
         float upper_coeff = .8f;
     } cal_;
@@ -35,8 +36,8 @@ private:
     bool ready_ = false, released_ = true, builder_ = false;
     bool web_enabled_ = false;
     esp_err_t last_error_ = ESP_OK, release_error_ = ESP_OK;
-    std::array<float, 6> commanded_;
-    std::array<float, 4> pose_ = {.5f, .5f, NAN, NAN}, from_ = pose_;
+    std::array<float, 5> commanded_;
+    std::array<float, 3> pose_ = {.5f, .5f, NAN}, from_ = pose_;
     int animation_ = -1, frame_ = 0;
     // Endpoint hunting: the explored axis moves outside its calibrated window,
     // so it is deliberately not reflected in commanded_.
@@ -51,7 +52,7 @@ private:
     esp_err_t Write(int axis, float degrees);
     esp_err_t Pulse(int channel, float us);
     float Micros(const Axis& axis, float degrees) const;
-    esp_err_t Apply(const std::array<float, 4>& pose);
+    esp_err_t Apply(const std::array<float, 3>& pose);
     esp_err_t Tick(int64_t now);
     bool Valid(const Calibration& cal, bool complete) const;
     esp_err_t Save();
