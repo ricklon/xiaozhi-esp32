@@ -11,6 +11,7 @@
 #include <iostream>
 #include <functional>
 #include <fstream>
+#include <cstdint>
 
 static void Reject(const std::function<void()>& f) {
     bool rejected=false; try {f();} catch(...) {rejected=true;} assert(rejected);
@@ -76,5 +77,48 @@ int main(int argc, char** argv) {
     fake_nvs.assign(3,0xff);
     CogletController fresh; fresh.Load(); assert(!fresh.Valid(fresh.cal_,true));
     fake_fail_after=0; assert(fresh.InitHardware()!=ESP_OK && fresh.released_);
+    fake_fail_after=-1; // the InitHardware check above left I2C failing
+    // Endpoint hunting: builder-only, local-only, bounded step, and a marked
+    // endpoint drops confirmation until a human has watched it again.
+    Reject([&]{c.Command("explore mouth");});
+    Reject([&]{c.Command("explore lid_left junk",true);});
+    c.Command("explore mouth",true);
+    assert(c.exploring_==4 && c.explore_angle_==90 && std::isnan(c.commanded_[4]));
+    Reject([&]{c.Command("nudge 10",true);});
+    c.Command("nudge 5",true); assert(c.explore_angle_==95);
+    c.Command("mark low",true);
+    assert(c.cal_.axes[4].low==95 && !c.cal_.axes[4].confirmed);
+    c.Command("nudge -5",true); c.Command("mark high",true);
+    assert(c.cal_.axes[4].high==90);
+    c.Command("confirm mouth",true);
+    assert(c.cal_.axes[4].confirmed==1 && c.exploring_<0);
+    Reject([&]{c.Command("mark low",true);});      // nothing being explored
+    // Nudging cannot leave the hard pulse bound even with a huge request.
+    c.Command("explore mouth",true);
+    for(int i=0;i<60;++i) c.Command("nudge -5",true);
+    assert(c.explore_angle_==0);
+    for(int i=0;i<80;++i) c.Command("nudge 5",true);
+    assert(c.explore_angle_==180);
+    // identify wiggles a raw channel that no role owns yet.
+    fake_writes.clear();
+    c.Command("identify 7",true);
+    assert(!fake_writes.empty() && fake_writes.front().front()==6+4*7);
+    Reject([&]{c.Command("identify 16",true);});
+    Reject([&]{c.Command("identify 7");});
+    // A partly built mechanism: base and tilt fitted, no lids yet.
+    c.Command("release"); c.Command("confirm mouth",true);
+    auto full=c.cal_;
+    for(int i:{2,3}) {c.cal_.axes[i].channel=-1; c.cal_.axes[i].confirmed=0;}
+    assert(c.Valid(c.cal_,true));
+    c.Command("engage",true); c.Command("gaze 0 0");
+    assert(std::isnan(c.commanded_[2]) && std::isnan(c.commanded_[3]));
+    Reject([&]{c.Command("blink");});
+    assert(c.next_blink_==INT64_MAX);
+    // Missing base is still incomplete: gaze needs it.
+    auto lame=c.cal_; lame.axes[0].channel=-1; lame.axes[0].confirmed=0;
+    assert(!c.Valid(lame,true));
+    // An assigned but unconfirmed role blocks engagement.
+    lame=full; lame.axes[4].confirmed=0; assert(!c.Valid(lame,true));
+    c.Command("release"); c.cal_=full;
     std::cout<<"Coglet host safety and motion tests passed (fake I2C/NVS; no hardware).\n";
 }

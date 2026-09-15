@@ -143,7 +143,7 @@ esp_err_t CogletController::InitHardware() {
     return Register(0, 0xa0);
 }
 esp_err_t CogletController::Release() {
-    released_ = true; builder_ = false; animation_ = -1; blink_until_ = 0;
+    released_ = true; builder_ = false; animation_ = -1; blink_until_ = 0; exploring_ = -1;
     auto oe = gpio_set_level(SERVO_OE_PIN, 1);
     // Single-register full-off works even before auto-increment is configured.
     auto off = Register(0xfd, 0x10);
@@ -158,7 +158,8 @@ esp_err_t CogletController::Fail(esp_err_t error) {
 bool CogletController::Valid(const Calibration& cal, bool complete) const {
     if (cal.version != 1 || !Unit(cal.lid_trim) || !Unit(cal.upper_coeff)) return false;
     unsigned used = 0;
-    for (const auto& a : cal.axes) {
+    for (int i = 0; i < 6; ++i) {
+        const auto& a = cal.axes[i];
         if (a.confirmed > 1 || a.channel < -1 || a.channel > 15) return false;
         if (a.channel >= 0) {
             if (used & (1u << a.channel)) return false;
@@ -169,7 +170,13 @@ bool CogletController::Valid(const Calibration& cal, bool complete) const {
             a.min_us < 300 || a.max_us > 3000 || a.min_us >= a.max_us ||
             a.trim_us < -2700 || a.trim_us > 2700 ||
             a.min_us + a.trim_us < 300 || a.max_us + a.trim_us > 3000) return false;
-        if ((complete || a.confirmed) && (a.channel < 0 || a.low == a.high || !a.confirmed)) return false;
+        // Confirmation means a human watched this axis reach both endpoints.
+        if (a.confirmed && (a.channel < 0 || a.low == a.high)) return false;
+        // The mechanism is built up one servo at a time, so an unassigned role
+        // is a role not fitted yet, not an incomplete calibration. Gaze still
+        // needs base and tilt; anything assigned must be confirmed.
+        if (complete && i <= 1 && (a.channel < 0 || a.low == a.high || !a.confirmed)) return false;
+        if (complete && a.channel >= 0 && !a.confirmed) return false;
     }
     return true;
 }
@@ -204,6 +211,18 @@ esp_err_t CogletController::Write(int axis, float degrees) {
     if (e == ESP_OK) commanded_[axis] = degrees; // commit only after success
     return e;
 }
+// Raw per-channel pulse for endpoint hunting and channel identification:
+// bypasses the calibrated window, but never the hard 1000-2000us bound.
+esp_err_t CogletController::Pulse(int channel, float us) {
+    if (released_ || !ready_) return ESP_ERR_INVALID_STATE;
+    if (channel < 0 || channel > 15 || !(us >= 1000 && us <= 2000)) return ESP_ERR_INVALID_ARG;
+    int ticks = std::lround(us * 25.f / 122.f);
+    uint8_t bytes[] = {uint8_t(6+4*channel), 0, 0, uint8_t(ticks), uint8_t(ticks>>8)};
+    return i2c_master_transmit(device_, bytes, sizeof(bytes), 50);
+}
+float CogletController::Micros(const Axis& a, float degrees) const {
+    return a.min_us + (a.max_us-a.min_us)*degrees/180.f + a.trim_us;
+}
 esp_err_t CogletController::Apply(const std::array<float,4>& pose) {
     auto target = pose;
     // Eyemech upper-lid tracking: trim scales measured open end, then hood
@@ -213,6 +232,7 @@ esp_err_t CogletController::Apply(const std::array<float,4>& pose) {
     if (std::isnan(target[3])) target[3] = coupled;
     for (int i=0; i<4; ++i) {
         const auto& a=cal_.axes[i];
+        if (a.channel < 0) continue; // role not fitted on this mechanism
         auto e = Write(i, a.low+(a.high-a.low)*target[i]);
         if (e != ESP_OK) return e;
     }
@@ -259,6 +279,12 @@ cJSON* CogletController::State() {
     cJSON_AddStringToObject(root,"animation",animation_<0 ? "none" : animations[animation_].name);
     cJSON_AddStringToObject(root,"position_semantics","commanded positions; no feedback; null after release");
     cJSON_AddNumberToObject(root,"calibration_version",cal_.version);
+    if (exploring_>=0) {
+        cJSON_AddStringToObject(root,"exploring",names[exploring_]);
+        cJSON_AddNumberToObject(root,"explore_angle",explore_angle_);
+    } else {
+        cJSON_AddNullToObject(root,"exploring");
+    }
     cJSON_AddNumberToObject(root,"lid_trim",cal_.lid_trim);
     cJSON_AddNumberToObject(root,"upper_coeff",cal_.upper_coeff);
     auto* axes=cJSON_AddArrayToObject(root,"axes");
@@ -340,7 +366,8 @@ std::string CogletController::Command(const std::string& text, bool local) {
             const auto& a=cal_.axes[i]; pose_[i]=(commanded_[i]-a.low)/(a.high-a.low);
         }
         animation_=-1; blink_until_=0; next_blink_=BlinkTime(Now()+900);
-        for (int i=0;i<4;++i) if (!std::isfinite(commanded_[i])) next_blink_=INT64_MAX;
+        if (cal_.axes[2].channel<0 && cal_.axes[3].channel<0) next_blink_=INT64_MAX;
+        for (int i=0;i<4;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) next_blink_=INT64_MAX;
         hardware(Probe()); return Json(State());
     }
     if (verb == "engage" || verb == "builder") {
@@ -360,6 +387,65 @@ std::string CogletController::Command(const std::string& text, bool local) {
         next_blink_=INT64_MAX;
         return Json(State());
     }
+    // Endpoint hunting, for a mechanism whose servos are fitted one at a time.
+    // These move one axis outside its calibrated window, so they are local and
+    // builder-only, and every pulse stays inside the hard 1000-2000us bound.
+    if (verb == "identify") {
+        int channel=-1;
+        if (!local || !builder_ || released_ || !(in>>channel) || !end() || channel<0 || channel>15) check(ESP_ERR_INVALID_ARG);
+        hardware(Probe());
+        // A small visible wiggle answers "which part is on this channel?"
+        // before any role is assigned to it.
+        for (int k=0;k<2;++k) {
+            hardware(Pulse(channel,1440)); vTaskDelay(pdMS_TO_TICKS(180));
+            hardware(Pulse(channel,1560)); vTaskDelay(pdMS_TO_TICKS(180));
+        }
+        hardware(Pulse(channel,1500));
+        return Json(State());
+    }
+    if (verb == "explore") {
+        std::string role;
+        if (!local || !builder_ || released_ || !(in>>role) || !end()) check(ESP_ERR_INVALID_ARG);
+        int i=AxisIndex(role);
+        if (i<0 || cal_.axes[i].channel<0) check(ESP_ERR_INVALID_ARG);
+        hardware(Probe());
+        explore_angle_=90; exploring_=i;
+        hardware(Pulse(cal_.axes[i].channel, Micros(cal_.axes[i], explore_angle_)));
+        commanded_[i]=NAN; // outside the calibrated window; not a pose
+        return Json(State());
+    }
+    if (verb == "nudge") {
+        float delta;
+        if (!local || !builder_ || released_ || exploring_<0 || !(in>>delta) || !end() ||
+            !std::isfinite(delta) || std::abs(delta)>5) check(ESP_ERR_INVALID_ARG);
+        float next=std::min(180.f, std::max(0.f, explore_angle_+delta));
+        hardware(Probe());
+        hardware(Pulse(cal_.axes[exploring_].channel, Micros(cal_.axes[exploring_], next)));
+        explore_angle_=next;
+        return Json(State());
+    }
+    if (verb == "mark") {
+        std::string which;
+        if (!local || exploring_<0 || !(in>>which) || !end() ||
+            (which!="low" && which!="high")) check(ESP_ERR_INVALID_ARG);
+        auto candidate=cal_; auto& a=candidate.axes[exploring_];
+        (which=="low" ? a.low : a.high)=explore_angle_;
+        a.confirmed=0; // a moved endpoint has to be watched again
+        if (!Valid(candidate,false)) check(ESP_ERR_INVALID_ARG);
+        cal_=candidate;
+        return Json(State());
+    }
+    if (verb == "confirm") {
+        std::string role;
+        if (!local || !(in>>role) || !end()) check(ESP_ERR_INVALID_ARG);
+        int i=AxisIndex(role);
+        if (i<0) check(ESP_ERR_INVALID_ARG);
+        auto candidate=cal_; candidate.axes[i].confirmed=1;
+        if (!Valid(candidate,false)) check(ESP_ERR_INVALID_STATE);
+        cal_=candidate;
+        if (exploring_==i) exploring_=-1;
+        return Json(State());
+    }
     if (verb == "configure") {
         std::string role; int confirmed;
         Axis a;
@@ -376,7 +462,9 @@ std::string CogletController::Command(const std::string& text, bool local) {
         cal_.lid_trim=trim; cal_.upper_coeff=coeff; return Json(State());
     }
     if (verb == "save") {
-        if (!local || !released_ || !end()) check(ESP_ERR_INVALID_STATE);
+        // Saving moves nothing, and incremental bring-up wants each servo
+        // persisted as it is finished, without leaving builder mode.
+        if (!local || (!released_ && !builder_) || !end()) check(ESP_ERR_INVALID_STATE);
         check(Save()); return Json(State());
     }
     if (verb == "web") {
@@ -403,12 +491,15 @@ std::string CogletController::Command(const std::string& text, bool local) {
         if (!(in>>x>>y) || !end() || !std::isfinite(x) || !std::isfinite(y) || x< -100 || x>100 || y< -100 || y>100) check(ESP_ERR_INVALID_ARG);
         std::array<float,4> next={(x+100)/200,(y+100)/200,NAN,NAN};
         hardware(Probe()); hardware(Apply(next)); pose_=next;
-        animation_=-1; blink_until_=0; next_blink_=BlinkTime(Now());
+        animation_=-1; blink_until_=0;
+        next_blink_=(cal_.axes[2].channel>=0 || cal_.axes[3].channel>=0) ? BlinkTime(Now()) : INT64_MAX;
     } else if (verb == "blink") {
         if (!end()) check(ESP_ERR_INVALID_ARG);
         if (animation_>=0 || blink_until_) check(ESP_ERR_INVALID_STATE);
+        // No lid servo fitted, nothing to blink with.
+        if (cal_.axes[2].channel<0 && cal_.axes[3].channel<0) check(ESP_ERR_NOT_SUPPORTED);
         // Blink only after a gaze/animation has established a commanded pose.
-        for (int i=0;i<4;++i) if (!std::isfinite(commanded_[i])) check(ESP_ERR_INVALID_STATE);
+        for (int i=0;i<4;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) check(ESP_ERR_INVALID_STATE);
         auto closed=pose_; closed[2]=closed[3]=0;
         hardware(Probe()); hardware(Apply(closed)); blink_until_=Now()+70;
     } else {

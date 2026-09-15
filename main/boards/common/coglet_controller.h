@@ -38,6 +38,10 @@ private:
     std::array<float, 6> commanded_;
     std::array<float, 4> pose_ = {.5f, .5f, NAN, NAN}, from_ = pose_;
     int animation_ = -1, frame_ = 0;
+    // Endpoint hunting: the explored axis moves outside its calibrated window,
+    // so it is deliberately not reflected in commanded_.
+    int exploring_ = -1;
+    float explore_angle_ = 90;
     int64_t frame_start_ = 0, next_blink_ = 0, blink_until_ = 0;
     esp_err_t Register(uint8_t reg, uint8_t value);
     esp_err_t Probe();
@@ -45,6 +49,8 @@ private:
     esp_err_t Release();
     esp_err_t Fail(esp_err_t error);
     esp_err_t Write(int axis, float degrees);
+    esp_err_t Pulse(int channel, float us);
+    float Micros(const Axis& axis, float degrees) const;
     esp_err_t Apply(const std::array<float, 4>& pose);
     esp_err_t Tick(int64_t now);
     bool Valid(const Calibration& cal, bool complete) const;
