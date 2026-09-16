@@ -7,14 +7,20 @@
 #define AUDIO_INPUT_SAMPLE_RATE   16000
 #define AUDIO_OUTPUT_SAMPLE_RATE  16000
 
-// External I2S audio — same physical pad positions as XIAO ESP32-C3 setup.
-// XIAO S3 pads: D0=GPIO1, D1=GPIO2, D2=GPIO3, D3=GPIO4
-// Wire: D0(GPIO1)→DOUT(speaker), D1(GPIO2)→BCLK, D2(GPIO3)→WS/LRC, D3(GPIO4)→DIN(mic)
+// External I2S audio. XIAO S3 pads: D0=GPIO1, D1=GPIO2, D2=GPIO3, D3=GPIO4.
+// Wire: D0(GPIO1)→amp DIN, D1(GPIO2)→BCLK shared, D2(GPIO3)→mic SD,
+//       D3(GPIO4)→WS/LRC shared.
+//
+// D2 is the microphone and D3 is the word clock — the house harness convention,
+// matching the C3 Coglet, and the reverse of what this profile used before
+// 2026-09-15. Swapped, the amp runs with no LRC and buzzes while capture samples
+// a clock line and reads a flat zero, which is how the wiring was confirmed on
+// this unit.
 #define AUDIO_I2S_GPIO_MCLK   GPIO_NUM_NC
-#define AUDIO_I2S_GPIO_WS     GPIO_NUM_3
+#define AUDIO_I2S_GPIO_WS     GPIO_NUM_4
 #define AUDIO_I2S_GPIO_BCLK   GPIO_NUM_2
 #define AUDIO_I2S_GPIO_DOUT   GPIO_NUM_1
-#define AUDIO_I2S_GPIO_DIN    GPIO_NUM_4
+#define AUDIO_I2S_GPIO_DIN    GPIO_NUM_3
 
 // Boot button (XIAO S3 onboard button, active-low)
 #define BOOT_BUTTON_GPIO      GPIO_NUM_0
