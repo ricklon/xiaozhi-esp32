@@ -478,33 +478,31 @@ private:
                 .disable_control_phase = 1,
             }
         };
-        tp_io_config.scl_speed_hz = 400 * 1000;
+        esp_err_t ret;
+        if (is_v2_) {
+            // V2: CST820 at 0x15, which the CST816S driver handles.
+            tp_io_config.dev_addr = ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS;
+            tp_io_config.scl_speed_hz = 100 * 1000;
+        } else {
+            tp_io_config.scl_speed_hz = 400 * 1000;
+        }
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle));
         ESP_LOGI(TAG, "Initialize touch controller");
-        if (esp_lcd_touch_new_i2c_ft5x06(tp_io_handle, &tp_cfg, &tp) != ESP_OK) {
-            // Newer board revisions replace the FT3168 (0x38) with a CST816-class
-            // controller at 0x15. Fall back to it, and if neither answers, log
-            // the bus and run without touch rather than abort-looping.
-            esp_lcd_panel_io_del(tp_io_handle);
-            tp_io_handle = NULL;
-            esp_lcd_panel_io_i2c_config_t cst_io_config = tp_io_config;
-            cst_io_config.dev_addr = ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS;
-            cst_io_config.scl_speed_hz = 100 * 1000;
-            if (i2c_master_probe(codec_i2c_bus_, ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS, 50) != ESP_OK ||
-                esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &cst_io_config, &tp_io_handle) != ESP_OK ||
-                esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &tp) != ESP_OK) {
-                ESP_LOGE(TAG, "Touch controller not found; continuing without touch");
-                for (uint16_t addr = 0x08; addr < 0x78; addr++) {
-                    if (i2c_master_probe(codec_i2c_bus_, addr, 50) == ESP_OK) {
-                        ESP_LOGW(TAG, "I2C device at 0x%02x", addr);
-                    }
+        if (is_v2_) {
+            ret = esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &tp);
+        } else {
+            ret = esp_lcd_touch_new_i2c_ft5x06(tp_io_handle, &tp_cfg, &tp);
+        }
+        if (ret != ESP_OK) {
+            // Log the bus and run without touch rather than abort-looping.
+            ESP_LOGE(TAG, "Touch controller not found; continuing without touch");
+            for (uint16_t addr = 0x08; addr < 0x78; addr++) {
+                if (i2c_master_probe(codec_i2c_bus_, addr, 50) == ESP_OK) {
+                    ESP_LOGW(TAG, "I2C device at 0x%02x", addr);
                 }
-                if (tp_io_handle) {
-                    esp_lcd_panel_io_del(tp_io_handle);
-                }
-                return;
             }
-            ESP_LOGI(TAG, "Using CST816 touch controller at 0x15");
+            esp_lcd_panel_io_del(tp_io_handle);
+            return;
         }
         const lvgl_port_touch_cfg_t touch_cfg = {
             .disp = lv_display_get_default(), 
