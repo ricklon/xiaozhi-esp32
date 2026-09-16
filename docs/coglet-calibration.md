@@ -3,16 +3,22 @@
 The mechanism is built up one servo at a time, so every step here works on a
 partly wired robot. Nothing in this procedure requires the other roles to exist.
 
-Roles: `base`, `tilt`, `lids`, `mouth`, `ears`. One servo drives both top
-lids, so there is a single `lids` axis and no per-eye roles.
+Roles, in the order the servos are fitted (bottom of the mechanism upward):
+`base`, `neck_tilt`, `neck_roll`, `eye_pan`, `eye_tilt`, `lids`, `jaw`,
+`ear_left`, `ear_right`. One servo drives both top lids, so `lids` is a single
+axis and there are no per-eye lid roles.
 Endpoints are **semantic**, and may run numerically backwards:
 
 | Role | `low` means | `high` means |
 |---|---|---|
 | base | left | right |
-| tilt | down | up |
+| neck_tilt | down | up |
+| neck_roll | left | right |
+| eye_pan | left | right |
+| eye_tilt | down | up |
 | lids | closed | open |
-| mouth, ears | mechanism specific | mechanism specific |
+| jaw | closed | open |
+| ear_left, ear_right | back | forward |
 
 All calibration commands are **local only** (serial or the builder web page)
 and most are **builder mode only**. Pulses never leave the hard 1000-2000 us
@@ -60,18 +66,24 @@ Notes:
 
 ## When enough servos are fitted
 
-`engage` needs **base and tilt** confirmed, and every *assigned* role confirmed.
-Roles left unassigned are treated as not fitted and are skipped:
+`engage` needs at least one role fitted and every *assigned* role confirmed.
+Roles left unassigned are treated as not fitted and are skipped.
+
+Only three roles have choreography: `gaze` and the animations drive `eye_pan`
+and `eye_tilt`, and `blink` drives `lids`. The neck, jaw and ears are
+builder-only for now, so they stay still during conversation:
 
 ```bash
 !coglet release
 !coglet engage
-!coglet gaze 0 0             # works with only base and tilt
-!coglet gaze -100 0          # full left
+!coglet gaze 0 0             # needs eye_pan and eye_tilt fitted
+!coglet gaze -100 0          # eyes full left
 ```
 
-`blink` and automatic blinking need a lid servo; without one, blink returns
-`ESP_ERR_NOT_SUPPORTED` and auto-blink stays off.
+`blink` and automatic blinking need the lid servo; without it, blink returns
+`ESP_ERR_NOT_SUPPORTED` and auto-blink stays off. `gaze` and `animate` likewise
+return `ESP_ERR_NOT_SUPPORTED` until both eye axes are fitted — expected while
+working bottom-up, where the base is calibrated long before the eyes exist.
 
 ## Backing up
 
@@ -90,3 +102,6 @@ from the `lids` **role** used by `configure`, `explore` and `confirm`.
 ## Still to do
 
 - Voice-guided calibration, where the robot walks you through this by talking.
+- Neck motion during conversation: the head could follow gaze beyond the eyes'
+  travel. Left out until the neck is calibrated and its load is understood.
+- Jaw motion tied to speech, and any ear choreography.

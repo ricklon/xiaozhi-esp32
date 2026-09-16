@@ -17,7 +17,18 @@
 #include <cstdio>
 
 namespace {
-constexpr const char* names[] = {"base", "tilt", "lids", "mouth", "ears"};
+// Roles run bottom of the mechanism upward, the order the servos are fitted
+// in. Only three of them have choreography: gaze drives the two eye axes and
+// blink drives the shared top-lid servo. The neck carries the head's weight,
+// and jaw and ears have no invented motion, so those stay builder-only until
+// they are given some.
+constexpr const char* names[] = {"base", "neck_tilt", "neck_roll",
+                                 "eye_pan", "eye_tilt", "lids",
+                                 "jaw", "ear_left", "ear_right"};
+constexpr int kRoles = 9;
+constexpr int kEyePan = 3, kEyeTilt = 4, kLids = 5;
+// The pose vector is (eye pan, eye tilt, lids); this maps it onto roles.
+constexpr int kMotion[3] = {kEyePan, kEyeTilt, kLids};
 struct Frame { float lr, ud, lid; int ms; };
 static const Frame s_frames_look[] = {
     { 0.50f, 0.50f, 1.00f, 400 },   /* open, centred             */
@@ -88,7 +99,7 @@ const Animation animations[] = {ANIM(look), ANIM(roll), ANIM(side_eye), ANIM(win
 int64_t Now() { return esp_timer_get_time()/1000; }
 int64_t BlinkTime(int64_t now) { return now + 2000 + esp_random()%5001; }
 int AxisIndex(const std::string& name) {
-    for (int i=0; i<5; ++i) if (name == names[i]) return i;
+    for (int i=0; i<kRoles; ++i) if (name == names[i]) return i;
     return -1;
 }
 bool Unit(float v) { return std::isfinite(v) && v >= 0 && v <= 1; }
@@ -158,9 +169,10 @@ esp_err_t CogletController::Fail(esp_err_t error) {
     return error;
 }
 bool CogletController::Valid(const Calibration& cal, bool complete) const {
-    if (cal.version != 2 || !Unit(cal.lid_trim) || !Unit(cal.upper_coeff)) return false;
+    if (cal.version != 3 || !Unit(cal.lid_trim) || !Unit(cal.upper_coeff)) return false;
     unsigned used = 0;
-    for (int i = 0; i < 5; ++i) {
+    unsigned assigned = 0;
+    for (int i = 0; i < kRoles; ++i) {
         const auto& a = cal.axes[i];
         if (a.confirmed > 1 || a.channel < -1 || a.channel > 15) return false;
         if (a.channel >= 0) {
@@ -175,19 +187,20 @@ bool CogletController::Valid(const Calibration& cal, bool complete) const {
         // Confirmation means a human watched this axis reach both endpoints.
         if (a.confirmed && (a.channel < 0 || a.low == a.high)) return false;
         // The mechanism is built up one servo at a time, so an unassigned role
-        // is a role not fitted yet, not an incomplete calibration. Gaze still
-        // needs base and tilt; anything assigned must be confirmed.
-        if (complete && i <= 1 && (a.channel < 0 || a.low == a.high || !a.confirmed)) return false;
+        // is a role not fitted yet, not an incomplete calibration. Anything
+        // assigned must be confirmed before the robot may drive it.
         if (complete && a.channel >= 0 && !a.confirmed) return false;
+        if (a.channel >= 0) ++assigned;
     }
-    return true;
+    // Engaging a mechanism with nothing fitted would be a no-op with live outputs.
+    return !complete || assigned > 0;
 }
 void CogletController::Load() {
     nvs_handle_t h;
     if (nvs_open("coglet", NVS_READONLY, &h) != ESP_OK) return;
     Calibration candidate;
     size_t size = sizeof(candidate);
-    auto e = nvs_get_blob(h, "cal_v2", &candidate, &size);
+    auto e = nvs_get_blob(h, "cal_v3", &candidate, &size);
     nvs_close(h);
     if (e == ESP_OK && size == sizeof(candidate) && Valid(candidate, false)) cal_ = candidate;
 }
@@ -195,13 +208,13 @@ esp_err_t CogletController::Save() {
     nvs_handle_t h;
     auto e = nvs_open("coglet", NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
-    e = nvs_set_blob(h, "cal_v2", &cal_, sizeof(cal_));
+    e = nvs_set_blob(h, "cal_v3", &cal_, sizeof(cal_));
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h); return e;
 }
 esp_err_t CogletController::Write(int axis, float degrees) {
     if (released_ || !ready_) return ESP_ERR_INVALID_STATE;
-    if (axis < 0 || axis >= 5 || !std::isfinite(degrees)) return ESP_ERR_INVALID_ARG;
+    if (axis < 0 || axis >= kRoles || !std::isfinite(degrees)) return ESP_ERR_INVALID_ARG;
     const auto& a = cal_.axes[axis];
     if (a.channel < 0 || degrees < std::min(a.low,a.high) || degrees > std::max(a.low,a.high)) return ESP_ERR_INVALID_ARG;
     if (commanded_[axis] == degrees) return ESP_OK;
@@ -232,9 +245,9 @@ esp_err_t CogletController::Apply(const std::array<float,3>& pose) {
     float coupled = (0.5f + 0.5f*cal_.lid_trim)*(1.f-cal_.upper_coeff*(1.f-pose[1]));
     if (std::isnan(target[2])) target[2] = coupled;
     for (int i=0; i<3; ++i) {
-        const auto& a=cal_.axes[i];
+        const auto& a=cal_.axes[kMotion[i]];
         if (a.channel < 0) continue; // role not fitted on this mechanism
-        auto e = Write(i, a.low+(a.high-a.low)*target[i]);
+        auto e = Write(kMotion[i], a.low+(a.high-a.low)*target[i]);
         if (e != ESP_OK) return e;
     }
     return ESP_OK;
@@ -289,7 +302,7 @@ cJSON* CogletController::State() {
     cJSON_AddNumberToObject(root,"lid_trim",cal_.lid_trim);
     cJSON_AddNumberToObject(root,"upper_coeff",cal_.upper_coeff);
     auto* axes=cJSON_AddArrayToObject(root,"axes");
-    for (int i=0;i<5;++i) {
+    for (int i=0;i<kRoles;++i) {
         auto* v=cJSON_CreateObject(); const auto& a=cal_.axes[i];
         cJSON_AddStringToObject(v,"role",names[i]); cJSON_AddNumberToObject(v,"channel",a.channel);
         cJSON_AddNumberToObject(v,"low",a.low); cJSON_AddNumberToObject(v,"high",a.high);
@@ -363,12 +376,15 @@ std::string CogletController::Command(const std::string& text, bool local) {
     if (verb == "stop") {
         if (!end()) check(ESP_ERR_INVALID_ARG);
         // Freeze the successful commanded pose, including lids, mid-animation.
-        for (int i=0;i<3;++i) if (std::isfinite(commanded_[i]) && cal_.axes[i].low != cal_.axes[i].high) {
-            const auto& a=cal_.axes[i]; pose_[i]=(commanded_[i]-a.low)/(a.high-a.low);
+        for (int i=0;i<3;++i) {
+            const auto& a=cal_.axes[kMotion[i]];
+            if (std::isfinite(commanded_[kMotion[i]]) && a.low != a.high)
+                pose_[i]=(commanded_[kMotion[i]]-a.low)/(a.high-a.low);
         }
         animation_=-1; blink_until_=0; next_blink_=BlinkTime(Now()+900);
-        if (cal_.axes[2].channel<0) next_blink_=INT64_MAX;
-        for (int i=0;i<3;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) next_blink_=INT64_MAX;
+        if (cal_.axes[kLids].channel<0) next_blink_=INT64_MAX;
+        for (int i=0;i<3;++i)
+            if (cal_.axes[kMotion[i]].channel>=0 && !std::isfinite(commanded_[kMotion[i]])) next_blink_=INT64_MAX;
         hardware(Probe()); return Json(State());
     }
     if (verb == "engage" || verb == "builder") {
@@ -487,20 +503,25 @@ std::string CogletController::Command(const std::string& text, bool local) {
     }
     if (verb != "gaze" && verb != "blink" && verb != "animate") check(ESP_ERR_NOT_SUPPORTED);
     if (released_ || builder_ || !Valid(cal_,true)) check(ESP_ERR_INVALID_STATE);
+    // Gaze and the animations are eye motion: without both eye axes fitted
+    // there is nothing to point, whatever else is on the mechanism.
+    if (verb != "blink" && (cal_.axes[kEyePan].channel<0 || cal_.axes[kEyeTilt].channel<0))
+        check(ESP_ERR_NOT_SUPPORTED);
     if (verb == "gaze") {
         float x,y;
         if (!(in>>x>>y) || !end() || !std::isfinite(x) || !std::isfinite(y) || x< -100 || x>100 || y< -100 || y>100) check(ESP_ERR_INVALID_ARG);
         std::array<float,3> next={(x+100)/200,(y+100)/200,NAN};
         hardware(Probe()); hardware(Apply(next)); pose_=next;
         animation_=-1; blink_until_=0;
-        next_blink_=cal_.axes[2].channel>=0 ? BlinkTime(Now()) : INT64_MAX;
+        next_blink_=cal_.axes[kLids].channel>=0 ? BlinkTime(Now()) : INT64_MAX;
     } else if (verb == "blink") {
         if (!end()) check(ESP_ERR_INVALID_ARG);
         if (animation_>=0 || blink_until_) check(ESP_ERR_INVALID_STATE);
         // No lid servo fitted, nothing to blink with.
-        if (cal_.axes[2].channel<0) check(ESP_ERR_NOT_SUPPORTED);
+        if (cal_.axes[kLids].channel<0) check(ESP_ERR_NOT_SUPPORTED);
         // Blink only after a gaze/animation has established a commanded pose.
-        for (int i=0;i<3;++i) if (cal_.axes[i].channel>=0 && !std::isfinite(commanded_[i])) check(ESP_ERR_INVALID_STATE);
+        for (int i=0;i<3;++i)
+            if (cal_.axes[kMotion[i]].channel>=0 && !std::isfinite(commanded_[kMotion[i]])) check(ESP_ERR_INVALID_STATE);
         auto closed=pose_; closed[2]=0;
         hardware(Probe()); hardware(Apply(closed)); blink_until_=Now()+70;
     } else {
@@ -548,7 +569,7 @@ esp_err_t CogletController::Http(httpd_req_t* req) {
         return httpd_resp_sendstr(req,R"HTML(<!doctype html><meta name="viewport" content="width=device-width"><title>Coglet builder</title>
 <h1>Coglet builder controls</h1><p>Servos have no position feedback. Keep a hand on the servo-power switch.</p>
 <p>Commands: state, export, release, builder, engage, servo ROLE DEGREES, jog ROLE DELTA, gaze X Y, blink, animate NAME, stop, save.</p>
-<p>Configure while released: configure ROLE CHANNEL LOW HIGH MIN_US MAX_US TRIM_US CONFIRMED. Roles: base tilt lids mouth ears. Confirmed: 0 or 1.</p>
+<p>Configure while released: configure ROLE CHANNEL LOW HIGH MIN_US MAX_US TRIM_US CONFIRMED. Roles: base neck_tilt neck_roll eye_pan eye_tilt lids jaw ear_left ear_right. Confirmed: 0 or 1.</p>
 <form id="form"><input id="command" size="65" value="state"><button>Run</button></form>
 <button onclick="run('release')">Release outputs</button> <button onclick="run('state')">State</button>
 <pre id="result"></pre><script>

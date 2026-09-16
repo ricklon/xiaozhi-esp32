@@ -75,10 +75,11 @@ USB port at 115200 baud once `XiaoSerialInputTask` installs the VFS driver.
 
 ## Servo provisioning
 
-Every boot starts released with all five roles unassigned. Provision channels
+Every boot starts released with all nine roles unassigned. Provision channels
 and endpoints over serial (`!coglet ...`) or the MCP tools before anything moves.
-Servos are fitted one at a time, so a partly built mechanism is supported: gaze
-needs base and tilt, and unassigned roles are skipped. See
+Servos are fitted one at a time from the base upward, so a partly built
+mechanism is supported: gaze needs the two eye axes, blink needs the lid servo,
+and unassigned roles are skipped. See
 `docs/coglet-calibration.md` for the per-servo procedure:
 
 - `self.coglet.gaze`, `self.coglet.blink`, `self.coglet.animate`

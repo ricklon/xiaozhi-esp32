@@ -8,13 +8,14 @@ import math
 import sys
 from pathlib import Path
 
-roles = ('base', 'tilt', 'lids', 'mouth', 'ears')
+roles = ('base', 'neck_tilt', 'neck_roll', 'eye_pan', 'eye_tilt',
+         'lids', 'jaw', 'ear_left', 'ear_right')
 data = json.loads(Path(sys.argv[1]).read_text())
-if data.get('calibration_version') != 2:
-    raise SystemExit('Expected Coglet calibration_version 2; no Eyemech import')
+if data.get('calibration_version') != 3:
+    raise SystemExit('Expected Coglet calibration_version 3; no Eyemech import')
 axes = data['axes']
-if len(axes) != 5 or {a['role'] for a in axes} != set(roles):
-    raise SystemExit('Expected all five Coglet roles exactly once')
+if len(axes) != 9 or {a['role'] for a in axes} != set(roles):
+    raise SystemExit('Expected all nine Coglet roles exactly once')
 commands = ['!coglet release']
 for role in roles:
     commands.append(f'!coglet configure {role} -1 90 90 1000 2000 0 0')

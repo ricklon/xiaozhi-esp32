@@ -1,6 +1,6 @@
 # Coglet — XIAO ESP32-S3 Sense
 
-This profile combines Xiaozhi audio, camera and native MCP with a five-role
+This profile combines Xiaozhi audio, camera and native MCP with a nine-role
 Coglet servo controller adapted from `../eyemech-esp32-xiao`. Existing Sense and Eyes
 profiles are unchanged. **No flashing, board identification, calibration export
 from a connected board, or physical qualification was performed during development.**
@@ -48,17 +48,20 @@ cannot guarantee a motion-free reset with unwired /OE and retained PCA pulses.
 
 ## Coglet mapping and motion adaptation
 
-Logical roles are `base`, `tilt`, `lids`, `mouth`, `ears`.
+Logical roles, bottom of the mechanism upward: `base`, `neck_tilt`,
+`neck_roll`, `eye_pan`, `eye_tilt`, `lids`, `jaw`, `ear_left`, `ear_right`.
 Provision each with a unique PCA channel 0–5; defaults are **-1 (unassigned)**.
-This five-role model assumes **one servo driving both top lids** (confirmed on
-the built mechanism, 2026-09-15) and one mechanically shared ears servo. There
-are no lower lids and no per-eye lid roles. Confirm that arrangement and the actual plug mapping before
+This nine-role model matches the built mechanism (confirmed 2026-09-15): a
+three-axis neck under a two-axis eye assembly, **one servo driving both top
+lids**, a jaw, and two independent ears. There are no lower lids and no per-eye
+lid roles. Servos are fitted one at a time from the base upward, so a partly
+built mechanism is normal, not an error. Confirm that arrangement and the actual plug mapping before
 provisioning. If the ears are independent or the lids share a servo, change the
 role model before driving; do not assign duplicate channels to simulate coupling.
 
 The old Eyemech assignment was 0=LR, 1=UD, 2=TL, 3=BL, 4=TR, 5=BR. **Do not copy
 that assignment or its measured angles to Coglet.** Gaze maps to base/tilt, blink
-and wink use only the shared lid axis, and mouth/ears are available for individual
+and wink use only the shared lid axis, and the neck, jaw and ears are available for individual
 builder tests. They remain released during conversational gaze and expressions;
 no lower-lid command is repurposed as a mouth or ears command.
 
@@ -102,7 +105,7 @@ reset the MCU. Do not flash until the owner has verified the backup and power
 state. No commands below authorize operating an unidentified attached board.
 
 From the existing Eyemech firmware, capture `!status` and the browser
-`GET /api/state` output to files. Record all five endpoints, per-axis min/max pulse,
+`GET /api/state` output to files. Record all nine endpoints, per-axis min/max pulse,
 angle range, trim_us, lid_trim, lid_coeff and safeboot. Its measured values reside
 in NVS namespace `eyemech`, blob `servo_cal_v1`, with separate `lid_trim`,
 `lid_coeff`, `safeboot` keys; compiled defaults are different.
@@ -178,7 +181,7 @@ Robot commands use the distinct `!coglet` prefix:
 | `!coglet nudge DELTA` | Builder only; at most ±5°, clamped to the hard 1000-2000 us bound |
 | `!coglet mark low\|high` | Record the explored position as that semantic endpoint; clears confirmed |
 | `!coglet confirm ROLE` | Mark a role as watched at both endpoints |
-| `!coglet engage` | Require base and tilt confirmed, and every *assigned* role confirmed; unassigned roles are skipped |
+| `!coglet engage` | Require at least one fitted role and every *assigned* role confirmed; unassigned roles are skipped |
 | `!coglet gaze X Y` | Normal mode, -100…100 mapped to calibrated base/tilt endpoints |
 | `!coglet blink` | One timed blink after an established gaze; refused during animation |
 | `!coglet animate NAME` | One named expression |
@@ -192,7 +195,8 @@ The 1000–2000 µs empty defaults are merely placeholders, not measured values.
 Use one unloaded servo, then a single 2° direction test after any horn change.
 Release before editing the window. Never infer endpoints from another servo;
 LOW/HIGH are semantic endpoints, and may be numerically reversed. For lids they
-mean closed/open; for base and tilt they mean left/right and down/up. Stop short
+mean closed/open; for base, neck_roll and eye_pan left/right, and for
+neck_tilt and eye_tilt down/up. Stop short
 of binding, have a human confirm each endpoint, then set confirmed=1 and save.
 For channel swaps, unassign the affected roles first (CH=-1, confirmed=0).
 
