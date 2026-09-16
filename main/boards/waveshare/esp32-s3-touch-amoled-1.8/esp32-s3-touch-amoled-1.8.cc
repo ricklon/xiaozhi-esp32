@@ -1,6 +1,7 @@
 #include "wifi_board.h"
 #include "display/lcd_display.h"
 #include "esp_lcd_sh8601.h"
+#include "esp_lcd_co5300.h"
 
 #include "codecs/es8311_audio_codec.h"
 #include "application.h"
@@ -77,6 +78,23 @@ static const sh8601_lcd_init_cmd_t vendor_specific_init[] = {
     {0x51, (uint8_t[]){0x00}, 1, 10},
     {0x29, (uint8_t[]){0x00}, 0, 10}
 };
+
+// V2 boards (CO5300 panel + CST820 touch), per Waveshare's
+// 13_display_colorbar example. Same QSPI pins as the SH8601 original.
+static const co5300_lcd_init_cmd_t co5300_init_cmds[] = {
+    {0xFE, (uint8_t[]){0x00}, 1, 0},
+    {0xC4, (uint8_t[]){0x80}, 1, 0},
+    {0x3A, (uint8_t[]){0x55}, 1, 0},
+    {0x35, (uint8_t[]){0x00}, 1, 0},
+    {0x53, (uint8_t[]){0x20}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
+    {0x63, (uint8_t[]){0xFF}, 1, 0},
+    {0x2A, (uint8_t[]){0x00, 0x00, 0x01, 0x6F}, 4, 0},
+    {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xBF}, 4, 0},
+    {0x11, NULL, 0, 100},
+    {0x29, NULL, 0, 0},
+};
+static const int kCo5300PanelXGap = 0x10;
 
 class CustomLcdDisplay : public SpiLcdDisplay {
 public:
@@ -194,6 +212,8 @@ private:
     CustomLcdDisplay* display_;
     CustomBacklight* backlight_;
     esp_io_expander_handle_t io_expander = NULL;
+    // V2 revision: CO5300 panel + CST820 touch at 0x15 instead of SH8601 + FT3168 at 0x38.
+    bool is_v2_ = false;
     PowerSaveTimer* power_save_timer_;
     int last_discharging_ = -1;  // -1 = unknown, 0 = charging (always-on), 1 = discharging
 
@@ -359,7 +379,20 @@ private:
         });
     }
 
-    void InitializeSH8601Display() {
+    // Waveshare's own revision check: the touch chip answers at 0x15 only on V2.
+    // Must run after the TCA9554 has released the touch reset line.
+    void DetectBoardRevision() {
+        // The controller needs a moment after reset before it ACKs; retry up to ~500 ms.
+        for (int i = 0; i < 10 && !is_v2_; i++) {
+            is_v2_ = i2c_master_probe(codec_i2c_bus_, 0x15, 50) == ESP_OK;
+            if (!is_v2_) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+        }
+        ESP_LOGI(TAG, "Board revision: %s", is_v2_ ? "V2 (CO5300 + CST820)" : "original (SH8601 + FT3168)");
+    }
+
+    void InitializeDisplay() {
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         esp_lcd_panel_handle_t panel = nullptr;
 
@@ -374,24 +407,39 @@ private:
 
         // 初始化液晶屏驱动芯片
         ESP_LOGD(TAG, "Install LCD driver");
-        const sh8601_vendor_config_t vendor_config = {
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = GPIO_NUM_NC;
+        panel_config.flags.reset_active_high = 1,
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+        panel_config.bits_per_pixel = 16;
+
+        const sh8601_vendor_config_t sh8601_config = {
             .init_cmds = &vendor_specific_init[0],
             .init_cmds_size = sizeof(vendor_specific_init) / sizeof(sh8601_lcd_init_cmd_t),
             .flags ={
                 .use_qspi_interface = 1,
             }
         };
-
-        esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = GPIO_NUM_NC;
-        panel_config.flags.reset_active_high = 1,
-        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-        panel_config.bits_per_pixel = 16;
-        panel_config.vendor_config = (void *)&vendor_config;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(panel_io, &panel_config, &panel));
+        const co5300_vendor_config_t co5300_config = {
+            .init_cmds = &co5300_init_cmds[0],
+            .init_cmds_size = sizeof(co5300_init_cmds) / sizeof(co5300_lcd_init_cmd_t),
+            .flags = {
+                .use_qspi_interface = 1,
+            }
+        };
+        if (is_v2_) {
+            panel_config.vendor_config = (void *)&co5300_config;
+            ESP_ERROR_CHECK(esp_lcd_new_panel_co5300(panel_io, &panel_config, &panel));
+        } else {
+            panel_config.vendor_config = (void *)&sh8601_config;
+            ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(panel_io, &panel_config, &panel));
+        }
 
         esp_lcd_panel_reset(panel);
         esp_lcd_panel_init(panel);
+        if (is_v2_) {
+            esp_lcd_panel_set_gap(panel, kCo5300PanelXGap, 0);
+        }
         esp_lcd_panel_invert_color(panel, false);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
@@ -515,8 +563,9 @@ public:
         InitializeCodecI2c();
         InitializeTca9554();
         InitializeAxp2101();
+        DetectBoardRevision();
         InitializeSpi();
-        InitializeSH8601Display();
+        InitializeDisplay();
         InitializeTouch();
         InitializeButtons();
         InitializeTools();
