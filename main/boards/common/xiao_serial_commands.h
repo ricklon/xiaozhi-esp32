@@ -193,6 +193,8 @@ static void HandleXiaoSerialLine(const char* buf) {
             std::string displayed_url = XiaoRedactServerUrl(stored.empty() ? CONFIG_OTA_URL : stored);
             printf("OTA URL: %s\r\n", displayed_url.c_str());
             printf("Usage: !server IP  or  !server http://IP:8003/xiaozhi/ota/\r\n");
+            printf("       A bare IP keeps the path but drops any query string;\r\n");
+            printf("       pass the full URL to carry an enrollment token.\r\n");
             printf("       !server list  -- recent servers   !server N  -- reuse #N\r\n");
             fflush(stdout);
             return;
@@ -255,6 +257,13 @@ static void HandleXiaoSerialLine(const char* buf) {
                 // A bare "/" (or empty) path is not a usable OTA endpoint — fall
                 // back to the default so a truncated stored URL self-heals.
                 if (path.empty() || path == "/") path = "/xiaozhi/ota/";
+                // Drop the query string when the host changes. Credentials in it
+                // belong to the server that issued them: carrying an
+                // enrollment_token from one hub to another makes every check-in
+                // fail with 401, and the URL looks correct while it does.
+                size_t query = path.find('?');
+                bool dropped_query = query != std::string::npos;
+                if (dropped_query) path = path.substr(0, query);
 
                 // Preserve the current port; default to :8003 if none is set anywhere
                 std::string base_port;
@@ -264,6 +273,10 @@ static void HandleXiaoSerialLine(const char* buf) {
                                  : !base_port.empty() ? base_port : ":8003";
 
                 url = "http://" + new_host + port + path;
+                if (dropped_query) {
+                    printf("Dropped the previous URL's query string: tokens belong "
+                           "to the server that issued them.\r\n");
+                }
             }
         server_commit:
             {
