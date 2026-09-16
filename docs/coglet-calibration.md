@@ -24,12 +24,29 @@ All calibration commands are **local only** (serial or the builder web page)
 and most are **builder mode only**. Pulses never leave the hard 1000-2000 us
 bound, whatever is asked for.
 
+## Silence first
+
+A voice agent answering room noise through the robot's own speaker makes
+endpoint hunting impossible, so calibration runs with the voice side quiet:
+
+- **`!coglet builder` pauses it automatically.** Entering builder mode aborts any
+  reply in progress, pauses listening, and stops the board reconnecting.
+- **Quiet does not lift by itself.** Leaving builder mode keeps the robot quiet,
+  because the LLM can call `self.coglet.release` over MCP: an auto-resume let the
+  robot talk its own way out of a calibration session. Say `!quiet off` when you
+  are done.
+- **`!quiet on` / `!quiet off`** does the same by hand, on any board, and survives
+  until toggled or rebooted. `!quiet status` reports it.
+- **Unplugging the speaker** is the hardware fallback and needs no firmware.
+- The hub's **listen mode** silences replies without touching the robot, but it
+  keeps the session open; builder mode is the better fit while calibrating.
+
 ## Procedure for one servo
 
 Servo power on, one servo fitted, hand near the power switch.
 
 ```bash
-!coglet builder              # outputs on; nothing moves
+!coglet builder              # outputs on; nothing moves; voice agent pauses
 !coglet identify 0           # wiggles raw channel 0 ~1.4s; repeat per channel
                              # until the part you just fitted twitches
 !coglet release              # channel mapping is edited while released

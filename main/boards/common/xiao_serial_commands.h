@@ -69,7 +69,7 @@ static const char* TrimXiaoSerialLine(char* buf) {
     }
 
     const char* known_commands[] = {
-        "!reboot", "!status", "!camera", "!server", "!wifi", "!mic", "!speaker", "!stop", "!help"
+        "!reboot", "!status", "!camera", "!server", "!wifi", "!mic", "!speaker", "!stop", "!quiet", "!help"
     };
     for (const char* command : known_commands) {
         char* command_start = strstr(start, command);
@@ -361,6 +361,32 @@ static void HandleXiaoSerialLine(const char* buf) {
         return;
     }
 
+    // --- !quiet ---
+    // Pauses all local listening until toggled or rebooted, so the robot stops
+    // talking while a builder works on it. Servo calibration is impossible with
+    // a voice agent answering room noise through the same speaker.
+    if (strncmp(buf, "!quiet", 6) == 0 && (buf[6] == ' ' || buf[6] == '\0')) {
+        const char* args = buf[6] == ' ' ? buf + 7 : "";
+        auto& app = Application::GetInstance();
+        if (strcmp(args, "off") == 0) {
+            app.SetListeningPaused(false);
+            printf("Quiet mode off: listening resumed.\r\n");
+        } else if (strcmp(args, "status") == 0) {
+            printf("Quiet mode: %s\r\n", app.IsListeningPaused() ? "on" : "off");
+        } else if (args[0] == '\0' || strcmp(args, "on") == 0) {
+            if (app.GetDeviceState() == kDeviceStateSpeaking) {
+                app.AbortSpeaking(kAbortReasonNone);
+            }
+            app.SetListeningPaused(true);
+            app.StopListening();
+            printf("Quiet mode on: not listening, not speaking.\r\n");
+        } else {
+            printf("Usage: !quiet [on|off|status]\r\n");
+        }
+        fflush(stdout);
+        return;
+    }
+
     // --- !mic ---
     if (strncmp(buf, "!mic", 4) == 0 && (buf[4] == ' ' || buf[4] == '\0')) {
         const char* args = buf[4] == ' ' ? buf + 5 : "";
@@ -439,6 +465,7 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !speaker status      -- show speaker volume and output state\r\n");
         printf("  !reboot              -- reboot the device\r\n");
         printf("  !stop                -- stop listening / close active listening\r\n");
+        printf("  !quiet [on|off]      -- pause/resume listening and speaking\r\n");
 #if defined(CONFIG_BOARD_TYPE_COGLET) || defined(CONFIG_BOARD_TYPE_COGLET_C3)
         printf("  !coglet state        -- robot diagnostics and calibration\r\n");
         printf("  !coglet release      -- latch servo outputs off (not a power cut)\r\n");

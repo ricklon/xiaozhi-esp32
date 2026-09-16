@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <mutex>
 #include <string>
@@ -15,6 +16,10 @@ public:
     static CogletController& Instance();
     void Start();
     std::string Command(const std::string& text, bool builder = false);
+    // True while a builder is calibrating. Boards use it to keep the voice
+    // agent quiet: a robot chatting through the speaker makes endpoint hunting
+    // impossible, and TTS competes for the same I2S bus.
+    bool BuilderMode() const { return builder_; }
 
 private:
     struct Axis {
@@ -34,7 +39,8 @@ private:
     std::mutex mutex_;
     i2c_master_bus_handle_t bus_ = nullptr;
     i2c_master_dev_handle_t device_ = nullptr;
-    bool ready_ = false, released_ = true, builder_ = false;
+    bool ready_ = false, released_ = true;
+    std::atomic<bool> builder_{false};
     bool web_enabled_ = false;
     esp_err_t last_error_ = ESP_OK, release_error_ = ESP_OK;
     std::array<float, 9> commanded_;

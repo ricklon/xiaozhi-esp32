@@ -163,7 +163,8 @@ for initial USB, Wi-Fi, audio and camera checks.
 
 Serial runs at 115200 over USB-Serial-JTAG. Existing commands remain available:
 `!wifi SSID PASSWORD`, `!server URL`, `!status`, `!speaker test`, `!speaker vol N`,
-`!mic`, `!camera`, `!stop` (voice session stop), and `!reboot`.
+`!mic`, `!camera`, `!stop` (voice session stop), `!quiet [on|off|status]`
+(pause listening and speaking while working on the robot), and `!reboot`.
 Robot commands use the distinct `!coglet` prefix:
 
 | Command | Effect |

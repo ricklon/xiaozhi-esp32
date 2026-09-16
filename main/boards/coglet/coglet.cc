@@ -96,9 +96,30 @@ private:
         xTaskCreate([](void*) {
             auto& app = Application::GetInstance();
             DeviceState last_state = kDeviceStateUnknown;
+            bool quieted = false;
             while (true) {
                 vTaskDelay(pdMS_TO_TICKS(500));
+                // Calibration needs silence: stop talking, stop listening, and
+                // stop reconnecting until the builder releases the servos.
+                // Entering builder mode silences the voice agent, but leaving it
+                // does NOT bring the voice back: the LLM can call
+                // self.coglet.release over MCP, and an auto-resume let the robot
+                // talk its own way out of a calibration session. Quiet ends only
+                // when a builder says so, with !quiet off.
+                if (CogletController::Instance().BuilderMode() && !quieted) {
+                    quieted = true;
+                    if (app.GetDeviceState() == kDeviceStateSpeaking) {
+                        app.AbortSpeaking(kAbortReasonNone);
+                    }
+                    app.SetListeningPaused(true);
+                    app.StopListening();
+                    ESP_LOGI(TAG, "Builder mode: voice agent paused until !quiet off");
+                } else if (quieted && !app.IsListeningPaused()) {
+                    quieted = false; // !quiet off, or the button resumed listening
+                    ESP_LOGI(TAG, "Voice agent resumed");
+                }
                 DeviceState state = app.GetDeviceState();
+                if (app.IsListeningPaused()) { last_state = state; continue; }
                 if (state == kDeviceStateIdle && last_state != kDeviceStateIdle) {
                     vTaskDelay(pdMS_TO_TICKS(1000));
                     if (app.GetDeviceState() == kDeviceStateIdle) {
