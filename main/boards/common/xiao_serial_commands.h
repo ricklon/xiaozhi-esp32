@@ -71,17 +71,17 @@ static const char* TrimXiaoSerialLine(char* buf) {
     const char* known_commands[] = {
         "!reboot", "!status", "!camera", "!server", "!wifi", "!mic", "!speaker", "!stop", "!quiet", "!help"
     };
+    // Recover a command preceded by line noise (e.g. "\x1b[A!status"), but only
+    // a known command followed by a space or end of line, so chat text with
+    // ordinary "!" punctuation ("Hello!") is still sent to the LLM intact.
     for (const char* command : known_commands) {
-        char* command_start = strstr(start, command);
-        if (command_start != nullptr) {
-            return command_start;
-        }
-    }
-
-    if (*start != '!') {
-        char* command_start = strchr(start, '!');
-        if (command_start != nullptr) {
-            return command_start;
+        size_t len = strlen(command);
+        for (char* command_start = strstr(start, command); command_start != nullptr;
+             command_start = strstr(command_start + 1, command)) {
+            char next = command_start[len];
+            if (next == ' ' || next == '\0') {
+                return command_start;
+            }
         }
     }
 
