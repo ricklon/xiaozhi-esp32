@@ -30,11 +30,14 @@
 #include <esp_lcd_touch_cst816s.h>
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
+#include <atomic>
 
 #define TAG "WaveshareEsp32s3TouchAMOLED1inch8"
 
 class Pmic : public Axp2101 {
 public:
+    static constexpr uint8_t kPowerKeyShortPressBit = 1 << 3;
+
     Pmic(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : Axp2101(i2c_bus, addr) {
         WriteReg(0x22, 0b110); // PWRON > OFFLEVEL as POWEROFF Source enable
         WriteReg(0x27, 0x10);  // hold 4s to power off
@@ -61,6 +64,20 @@ public:
         WriteReg(0x61, 0x02); // set Main battery precharge current to 50mA
         WriteReg(0x62, 0x08); // set Main battery charger current to 400mA ( 0x08-200mA, 0x09-300mA, 0x0A-400mA )
         WriteReg(0x63, 0x01); // set Main battery term charge current to 25mA
+    }
+
+    void EnablePowerKeyShortPressIrq() {
+        // AXP2101 IRQ enable/status group 1. Status bits are write-one-to-clear.
+        WriteReg(0x41, ReadReg(0x41) | kPowerKeyShortPressBit);
+        WriteReg(0x49, kPowerKeyShortPressBit);
+    }
+
+    bool ConsumePowerKeyShortPress() {
+        if ((ReadReg(0x49) & kPowerKeyShortPressBit) == 0) {
+            return false;
+        }
+        WriteReg(0x49, kPowerKeyShortPressBit);
+        return true;
     }
 };
 
@@ -216,14 +233,16 @@ private:
     bool is_v2_ = false;
     PowerSaveTimer* power_save_timer_;
     int last_discharging_ = -1;  // -1 = unknown, 0 = charging (always-on), 1 = discharging
+    std::atomic<bool> manually_sleeping_{false};
+    std::atomic<bool> muted_before_sleep_{false};
 
     // Standalone dim-only timer used while charging. PowerSaveTimer is
     // disabled on the charger so wake word detection isn't disturbed by its
     // sleep callbacks; this lightweight timer applies just the visual dim
     // (low brightness + sleepy emoji) on its own.
     esp_timer_handle_t dim_timer_ = nullptr;
-    int dim_ticks_ = 0;
-    bool dimmed_ = false;
+    std::atomic<int> dim_ticks_{0};
+    std::atomic<bool> dimmed_{false};
     bool dim_timer_running_ = false;
     static constexpr int kDimSeconds = 60;
 
@@ -237,7 +256,17 @@ private:
             GetDisplay()->SetPowerSaveMode(false);
             GetBacklight()->RestoreBrightness();
         });
+        power_save_timer_->OnShutdownWarning(15, [this](int seconds) {
+            Application::GetInstance().Schedule([this, seconds]() {
+                char message[96];
+                snprintf(message, sizeof(message),
+                    "Powering off in %d seconds. Press a button or tap the screen.", seconds);
+                GetBacklight()->SetBrightness(40);
+                GetDisplay()->ShowNotification(message, seconds * 1000);
+            });
+        });
         power_save_timer_->OnShutdownRequest([this]() {
+            ESP_LOGI(TAG, "Battery idle timeout: powering off");
             pmic_->PowerOff();
         });
         power_save_timer_->SetEnabled(true);
@@ -298,10 +327,69 @@ private:
         if (!dim_timer_running_) return;
         esp_timer_stop(dim_timer_);
         dim_timer_running_ = false;
-        if (dimmed_) {
-            dimmed_ = false;
+        if (dimmed_.exchange(false)) {
             ApplyDim(false);
         }
+    }
+
+    void ResetIdleTimers() {
+        power_save_timer_->WakeUp();
+        dim_ticks_ = 0;
+        if (dimmed_.exchange(false)) {
+            ApplyDim(false);
+        }
+    }
+
+    void SetManualSleep(bool sleeping) {
+        if (manually_sleeping_.exchange(sleeping) == sleeping) return;
+
+        auto& app = Application::GetInstance();
+        ResetIdleTimers();
+        if (sleeping) {
+            muted_before_sleep_ = app.IsListeningPaused();
+            if (!muted_before_sleep_) app.SetListeningPaused(true);
+            app.Schedule([this]() {
+                ESP_LOGI(TAG, "Manual sleep enabled");
+                GetDisplay()->SetPowerSaveMode(true);
+                GetDisplay()->SetStatus("Sleeping");
+                GetBacklight()->SetBrightness(5);
+                GetDisplay()->ShowNotification("Sleeping - press PWR or tap to wake", 4000);
+            });
+        } else {
+            if (!muted_before_sleep_) app.SetListeningPaused(false);
+            app.Schedule([this]() {
+                ESP_LOGI(TAG, "Manual sleep disabled");
+                GetDisplay()->SetPowerSaveMode(false);
+                GetBacklight()->RestoreBrightness();
+            });
+        }
+    }
+
+    void HandlePowerButtonShortPress() {
+        if (manually_sleeping_) {
+            SetManualSleep(false);
+        } else if (power_save_timer_->IsInSleepMode() || dimmed_) {
+            ResetIdleTimers();
+        } else {
+            SetManualSleep(true);
+        }
+    }
+
+    void InitializePowerButton() {
+        // Poll the AXP2101's latched short-press event. SYS_OUT on the TCA9554
+        // does not reflect the PWR key on the V2 board. A long hold remains a
+        // hardware power-off configured by the PMIC constructor.
+        pmic_->EnablePowerKeyShortPressIrq();
+        xTaskCreate([](void* arg) {
+            auto* self = static_cast<WaveshareEsp32s3TouchAMOLED1inch8*>(arg);
+            while (true) {
+                if (self->pmic_->ConsumePowerKeyShortPress()) {
+                    ESP_LOGI(TAG, "PWR short press");
+                    self->HandlePowerButtonShortPress();
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        }, "power_button", 3072, this, 3, nullptr);
     }
 
     void InitializeCodecI2c() {
@@ -362,9 +450,22 @@ private:
                 EnterWifiConfigMode();
                 return;
             }
-            app.ToggleChatState();
+            bool was_sleeping = manually_sleeping_;
+            if (was_sleeping) SetManualSleep(false);
+            ResetIdleTimers();
+            if (was_sleeping) {
+                app.Schedule([]() { Application::GetInstance().ToggleChatState(); });
+            } else {
+                app.ToggleChatState();
+            }
         });
         boot_button_.OnLongPress([this]() {
+            auto& app = Application::GetInstance();
+            if (manually_sleeping_) SetManualSleep(false);
+            ResetIdleTimers();
+            app.Schedule([]() { Application::GetInstance().ToggleListeningPaused(); });
+        });
+        boot_button_.OnDoubleClick([this]() {
             auto& wifi = WifiManager::GetInstance();
             Settings s("wifi", false);
             std::string ota_url = s.GetString("ota_url");
@@ -508,7 +609,16 @@ private:
             .disp = lv_display_get_default(), 
             .handle = tp,
         };
-        lvgl_port_add_touch(&touch_cfg);
+        auto touch_input = lvgl_port_add_touch(&touch_cfg);
+        if (touch_input != nullptr) {
+            lv_indev_add_event_cb(touch_input, [](lv_event_t* event) {
+                auto* self = static_cast<WaveshareEsp32s3TouchAMOLED1inch8*>(
+                    lv_event_get_user_data(event));
+                if (self->manually_sleeping_) self->SetManualSleep(false);
+                self->ResetIdleTimers();
+                ESP_LOGI(TAG, "Touch activity: display awake");
+            }, LV_EVENT_CLICKED, this);
+        }
         ESP_LOGI(TAG, "Touch panel initialized successfully");
     }
 
@@ -555,7 +665,7 @@ private:
 
 public:
     WaveshareEsp32s3TouchAMOLED1inch8() :
-        boot_button_(BOOT_BUTTON_GPIO) {
+        boot_button_(BOOT_BUTTON_GPIO, false, 2000) {
         InitializePowerSaveTimer();
         InitializeDimTimer();
         InitializeCodecI2c();
@@ -566,6 +676,7 @@ public:
         InitializeDisplay();
         InitializeTouch();
         InitializeButtons();
+        InitializePowerButton();
         InitializeTools();
         InitializeSerialInput();
         InitializeAudioMonitor();

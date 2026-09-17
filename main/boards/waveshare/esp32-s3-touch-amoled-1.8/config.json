@@ -5,7 +5,9 @@
         {
             "name": "esp32-s3-touch-amoled-1.8",
             "sdkconfig_append": [
-                "CONFIG_USE_WECHAT_MESSAGE_STYLE=y"
+                "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
+                "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
+                "CONFIG_SR_WN_WN9_COMPUTER_TTS=y"
             ]
         }
     ]

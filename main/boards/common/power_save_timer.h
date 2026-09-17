@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <atomic>
 
 #include <esp_timer.h>
 #include <esp_pm.h>
@@ -13,22 +14,26 @@ public:
     void SetEnabled(bool enabled);
     void OnEnterSleepMode(std::function<void()> callback);
     void OnExitSleepMode(std::function<void()> callback);
+    void OnShutdownWarning(int seconds_before_shutdown, std::function<void(int)> callback);
     void OnShutdownRequest(std::function<void()> callback);
     void WakeUp();
+    bool IsInSleepMode() const { return in_sleep_mode_.load(); }
 
 private:
     void PowerSaveCheck();
 
     esp_timer_handle_t power_save_timer_ = nullptr;
     bool enabled_ = false;
-    bool in_sleep_mode_ = false;
+    std::atomic<bool> in_sleep_mode_{false};
     bool is_wake_word_running_ = false;
     int ticks_ = 0;
     int cpu_max_freq_;
     int seconds_to_sleep_;
     int seconds_to_shutdown_;
+    int shutdown_warning_seconds_ = -1;
 
     std::function<void()> on_enter_sleep_mode_;
     std::function<void()> on_exit_sleep_mode_;
+    std::function<void(int)> on_shutdown_warning_;
     std::function<void()> on_shutdown_request_;
 };

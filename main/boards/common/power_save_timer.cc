@@ -55,6 +55,11 @@ void PowerSaveTimer::OnExitSleepMode(std::function<void()> callback) {
     on_exit_sleep_mode_ = callback;
 }
 
+void PowerSaveTimer::OnShutdownWarning(int seconds_before_shutdown, std::function<void(int)> callback) {
+    shutdown_warning_seconds_ = seconds_before_shutdown;
+    on_shutdown_warning_ = callback;
+}
+
 void PowerSaveTimer::OnShutdownRequest(std::function<void()> callback) {
     on_shutdown_request_ = callback;
 }
@@ -97,6 +102,11 @@ void PowerSaveTimer::PowerSaveCheck() {
                 esp_pm_configure(&pm_config);
             }
         }
+    }
+    if (seconds_to_shutdown_ != -1 && shutdown_warning_seconds_ > 0 &&
+        ticks_ == seconds_to_shutdown_ - shutdown_warning_seconds_ && on_shutdown_warning_) {
+        ESP_LOGI(TAG, "Shutdown in %d seconds", shutdown_warning_seconds_);
+        on_shutdown_warning_(shutdown_warning_seconds_);
     }
     if (seconds_to_shutdown_ != -1 && ticks_ >= seconds_to_shutdown_ && on_shutdown_request_) {
         on_shutdown_request_();
