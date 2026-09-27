@@ -141,6 +141,7 @@ Commands at runtime (via serial terminal at 115200 baud):
 |---------|--------|
 | `!wifi SSID PASS` | Add WiFi network to NVS |
 | `!wifi list` | List saved networks |
+| `!wifi remove N` | Remove saved network #N (numbered as in `!wifi list`) |
 | `!wifi clear` | Remove all networks |
 | `!server IP` | Set OTA URL to `http://IP:8003/xiaozhi/ota/` |
 | `!server URL` | Set full OTA URL |

@@ -163,6 +163,19 @@ static void HandleXiaoSerialLine(const char* buf) {
         } else if (strcmp(args, "clear") == 0) {
             ssid_manager.Clear();
             printf("\r\n=== WiFi Networks Cleared ===\r\n\r\n");
+        } else if (strncmp(args, "remove", 6) == 0 && (args[6] == ' ' || args[6] == '\0')) {
+            const auto& list = ssid_manager.GetSsidList();
+            int n = 0;
+            char extra = 0;
+            if (sscanf(args + 6, " %d %c", &n, &extra) == 1 && n >= 1 && n <= (int)list.size()) {
+                std::string removed = list[n - 1].ssid;
+                ssid_manager.RemoveSsid(n - 1);
+                printf("\r\n=== WiFi Network Removed ===\r\n");
+                printf("SSID: %s\r\n", removed.c_str());
+                printf("============================\r\n\r\n");
+            } else {
+                printf("\r\nUsage: !wifi remove N  (N from !wifi list, 1-%d)\r\n\r\n", (int)list.size());
+            }
         } else if (strlen(args) > 0) {
             char ssid[64] = {}, pass[64] = {};
             if (sscanf(args, "%63s %63s", ssid, pass) == 2) {
@@ -177,6 +190,7 @@ static void HandleXiaoSerialLine(const char* buf) {
             printf("\r\nWiFi Commands:\r\n");
             printf("  !wifi SSID PASSWORD  - Add network\r\n");
             printf("  !wifi list           - Show saved networks\r\n");
+            printf("  !wifi remove N       - Remove network #N from list\r\n");
             printf("  !wifi clear          - Remove all networks\r\n\r\n");
         }
         fflush(stdout);
@@ -462,6 +476,7 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("Commands:\r\n");
         printf("  !wifi SSID PASSWORD  -- add a WiFi network\r\n");
         printf("  !wifi list           -- list saved networks\r\n");
+        printf("  !wifi remove N       -- remove saved network #N\r\n");
         printf("  !wifi clear          -- remove all saved networks\r\n");
         printf("  !server IP           -- set server IP (keeps path) and reboot\r\n");
         printf("  !server URL          -- set full OTA URL and reboot\r\n");
