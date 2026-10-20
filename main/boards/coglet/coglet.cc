@@ -7,6 +7,7 @@
 #include "esp32_camera.h"
 #include "xiao_serial_commands.h"
 #include "coglet_controller.h"
+#include "coglet_mcp_tools.h"
 
 #include <esp_log.h>
 
@@ -145,7 +146,10 @@ public:
                 ssid_manager.AddSsid(known[i].ssid, known[i].pass);
             }
         }
-        CogletController::Instance().Start();
+        CogletController::Instance().Start({SERVO_I2C_PORT, SERVO_I2C_SDA_PIN,
+                                            SERVO_I2C_SCL_PIN, SERVO_OE_PIN,
+                                            SERVO_PCA9685_ADDR});
+        RegisterCogletMcpTools();
         InitializeButtons();
         InitializeSerialInput();
         InitializeCamera();
@@ -179,7 +183,7 @@ public:
     }
 
     virtual const char* GetWebFlasherManifest() const override {
-        return nullptr;  // No published Coglet web-flasher manifest yet.
+        return "manifest-coglet.json";  // github.com/ricklon/coglet web-flasher
     }
 };
 

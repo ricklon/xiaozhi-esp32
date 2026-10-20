@@ -892,9 +892,33 @@ else()
     list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})
 endif()
 
-# Coglet servo controller is shared by the ESP32-S3 and ESP32-C3 profiles.
+# The Coglet servo controller lives in its own repo, github.com/ricklon/coglet,
+# which carries this fork as a submodule at firmware/xiaozhi-esp32. Find it as
+# that submodule's parent, as a sibling checkout (../coglet), or wherever
+# COGLET_CONTROLLER_DIR (cache or environment) points.
 if(CONFIG_BOARD_TYPE_COGLET OR CONFIG_BOARD_TYPE_COGLET_C3)
-    list(APPEND SOURCES "boards/common/coglet_controller.cc")
+    idf_build_get_property(coglet_project_dir PROJECT_DIR)
+    set(COGLET_CONTROLLER_DIR "$ENV{COGLET_CONTROLLER_DIR}" CACHE PATH
+        "Directory holding coglet_controller.cc (github.com/ricklon/coglet firmware/coglet_controller)")
+    if(NOT COGLET_CONTROLLER_DIR)
+        foreach(candidate
+                "${coglet_project_dir}/../coglet_controller"
+                "${coglet_project_dir}/../coglet/firmware/coglet_controller")
+            if(EXISTS "${candidate}/coglet_controller.cc")
+                get_filename_component(COGLET_CONTROLLER_DIR "${candidate}" ABSOLUTE)
+                break()
+            endif()
+        endforeach()
+    endif()
+    if(NOT EXISTS "${COGLET_CONTROLLER_DIR}/coglet_controller.cc")
+        message(FATAL_ERROR "Coglet builds need the controller from github.com/ricklon/coglet. "
+                            "Build from that repo (just build c3|s3), check it out next to this "
+                            "one as ../coglet, or set COGLET_CONTROLLER_DIR.")
+    endif()
+    message(STATUS "Coglet controller: ${COGLET_CONTROLLER_DIR}")
+    list(APPEND SOURCES "${COGLET_CONTROLLER_DIR}/coglet_controller.cc"
+                        "boards/common/coglet_mcp_tools.cc")
+    list(APPEND INCLUDE_DIRS "${COGLET_CONTROLLER_DIR}")
 endif()
 
 # Select audio processor according to Kconfig
