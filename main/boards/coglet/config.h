@@ -7,14 +7,15 @@
 #define AUDIO_INPUT_SAMPLE_RATE   16000
 #define AUDIO_OUTPUT_SAMPLE_RATE  16000
 
-// External I2S audio — same physical pad positions as XIAO ESP32-C3 setup.
-// XIAO S3 pads: D0=GPIO1, D1=GPIO2, D2=GPIO3, D3=GPIO4
-// Wire: D0(GPIO1)→DOUT(speaker), D1(GPIO2)→BCLK, D2(GPIO3)→WS/LRC, D3(GPIO4)→DIN(mic)
+// Every Coglet is wired pad-for-pad the same; only the GPIO numbers differ per
+// board. This S3 layout is the reference (ricklon/coglet hardware/WIRING.md):
+//   D0 amp DIN, D1 BCLK, D2 WS, D3 mic SD, D4 PCA SDA, D5 PCA SCL, D10 /OE.
+// XIAO S3 pads: D0=GPIO1, D1=GPIO2, D2=GPIO3, D3=GPIO4, D4=GPIO5, D5=GPIO6, D10=GPIO9
 #define AUDIO_I2S_GPIO_MCLK   GPIO_NUM_NC
-#define AUDIO_I2S_GPIO_WS     GPIO_NUM_3
-#define AUDIO_I2S_GPIO_BCLK   GPIO_NUM_2
-#define AUDIO_I2S_GPIO_DOUT   GPIO_NUM_1
-#define AUDIO_I2S_GPIO_DIN    GPIO_NUM_4
+#define AUDIO_I2S_GPIO_WS     GPIO_NUM_3   // D2, shared
+#define AUDIO_I2S_GPIO_BCLK   GPIO_NUM_2   // D1, shared
+#define AUDIO_I2S_GPIO_DOUT   GPIO_NUM_1   // D0 -> amp DIN
+#define AUDIO_I2S_GPIO_DIN    GPIO_NUM_4   // D3 <- mic SD
 
 // Boot button (XIAO S3 onboard button, active-low)
 #define BOOT_BUTTON_GPIO      GPIO_NUM_0
@@ -48,10 +49,11 @@
     {nullptr, nullptr} \
 }
 
+// Servo I2C is controller 1 so the camera's SCCB keeps controller 0.
 #define SERVO_I2C_PORT I2C_NUM_1
-#define SERVO_I2C_SDA_PIN GPIO_NUM_5
-#define SERVO_I2C_SCL_PIN GPIO_NUM_6
-#define SERVO_OE_PIN GPIO_NUM_9
+#define SERVO_I2C_SDA_PIN GPIO_NUM_5   // D4
+#define SERVO_I2C_SCL_PIN GPIO_NUM_6   // D5
+#define SERVO_OE_PIN GPIO_NUM_9        // D10; not the camera's XCLK (GPIO10)
 #define SERVO_PCA9685_ADDR 0x40
 
 #endif // _BOARD_CONFIG_H_
