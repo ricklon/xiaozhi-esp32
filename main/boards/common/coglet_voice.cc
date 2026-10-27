@@ -1,11 +1,15 @@
 #include "coglet_voice.h"
 #include "application.h"
 #include "coglet_controller.h"
+#include "settings.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <cctype>
+#include <cstdlib>
+#include <stdexcept>
 
 #define TAG "Coglet"
 
@@ -100,4 +104,60 @@ void VoiceLoop(void*) {
 
 void StartCogletVoiceLoop() {
     xTaskCreate(VoiceLoop, "auto_connect", 4096, nullptr, 3, nullptr);
+}
+
+std::string CogletWakeWord(const std::string& args, bool* changed) {
+    *changed = false;
+#if CONFIG_USE_CUSTOM_WAKE_WORD
+    Settings settings("wake_word", true);
+    std::string phrase = settings.GetString("phrase");
+    int threshold = settings.GetInt("threshold", 0);
+    if (args.empty() || args == "status") {
+        return std::string("Wake phrase: \"") + (phrase.empty() ? CONFIG_CUSTOM_WAKE_WORD : phrase) + "\"" +
+               (phrase.empty() ? " (default)" : " (set on this robot)") + ", threshold " +
+               std::to_string(threshold > 0 ? threshold : CONFIG_CUSTOM_WAKE_WORD_THRESHOLD) +
+               (threshold > 0 ? "" : " (default)");
+    }
+    if (args == "default") {
+        settings.EraseKey("phrase");
+        settings.EraseKey("threshold");
+        *changed = true;
+        return std::string("Wake phrase back to \"") + CONFIG_CUSTOM_WAKE_WORD + "\"; rebooting.";
+    }
+    if (args.rfind("threshold", 0) == 0) {
+        char* end = nullptr;
+        long value = strtol(args.c_str() + 9, &end, 10);
+        if (args.size() <= 10 || args[9] != ' ' || *end != '\0' || value < 1 || value > 99) {
+            throw std::invalid_argument("threshold is 1 to 99; lower is more sensitive");
+        }
+        settings.SetInt("threshold", (int)value);
+        *changed = true;
+        return "Wake threshold " + std::to_string(value) + "; rebooting.";
+    }
+    // Lower-case English words, single spaces: what the phrase model expects.
+    std::string clean;
+    for (char c : args) {
+        if (isalpha((unsigned char)c) || c == '\'') {
+            clean += (char)tolower((unsigned char)c);
+        } else if (c == ' ') {
+            if (!clean.empty() && clean.back() != ' ') clean += ' ';
+        } else {
+            throw std::invalid_argument("A wake phrase is English words: letters, spaces and apostrophes");
+        }
+    }
+    while (!clean.empty() && clean.back() == ' ') clean.pop_back();
+    if (clean.size() < 3 || clean.size() > 40) throw std::invalid_argument("A wake phrase is 3 to 40 characters");
+    settings.SetString("phrase", clean);
+    *changed = true;
+    return "Wake phrase \"" + clean + "\"; rebooting.";
+#elif CONFIG_USE_AFE_WAKE_WORD || CONFIG_USE_ESP_WAKE_WORD
+    if (args.empty() || args == "status") {
+        return "Wake word: Computer (a trained model). For your own phrase, flash the Coglet S3 typed-phrase build.";
+    }
+    throw std::invalid_argument("This build's wake word is a trained model (Computer); flash the typed-phrase build "
+                                "to choose your own");
+#else
+    if (args.empty() || args == "status") return "No wake word: this robot is always listening.";
+    throw std::invalid_argument("No wake word on this build: it's always listening");
+#endif
 }

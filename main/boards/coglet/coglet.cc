@@ -153,12 +153,22 @@ public:
         return camera_;
     }
 
+    // The typed-phrase build (boards/coglet/phrase) is its own Web Programmer
+    // entry, so it reports its own id and manifest.
     virtual const char* GetFirmwareBoardId() const override {
+#if CONFIG_USE_CUSTOM_WAKE_WORD
+        return "coglet-phrase";
+#else
         return "coglet";
+#endif
     }
 
     virtual const char* GetWebFlasherManifest() const override {
-        return "manifest-coglet.json";  // github.com/ricklon/coglet web-flasher
+#if CONFIG_USE_CUSTOM_WAKE_WORD
+        return "manifest-coglet-phrase.json";  // github.com/ricklon/coglet web-programmer
+#else
+        return "manifest-coglet.json";  // github.com/ricklon/coglet web-programmer
+#endif
     }
 };
 

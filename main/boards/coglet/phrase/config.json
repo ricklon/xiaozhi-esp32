@@ -1,0 +1,28 @@
+{
+    "manufacturer": "Coglet",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "coglet-phrase",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_COGLET=y",
+                "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/8m_one_app.csv\"",
+                "CONFIG_LANGUAGE_EN_US=y",
+                "CONFIG_OTA_URL=\"http://<your-ota-server>/xiaozhi/ota/\"",
+                "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
+                "CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT=y",
+                "CONFIG_SPIRAM_MODE_OCT=y",
+                "CONFIG_COGLET_CAMERA_DETECT=y",
+                "CONFIG_SCCB_HARDWARE_I2C_PORT0=y",
+                "CONFIG_USE_CUSTOM_WAKE_WORD=y",
+                "CONFIG_CUSTOM_WAKE_WORD=\"hey coglet\"",
+                "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"Hey Coglet\"",
+                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=20",
+                "CONFIG_SR_MN_EN_MULTINET7_QUANT=y",
+                "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
+                "CONFIG_SEND_WAKE_WORD_DATA=n"
+            ]
+        }
+    ]
+}

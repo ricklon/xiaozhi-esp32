@@ -2,6 +2,7 @@
 #include "audio_service.h"
 #include "system_info.h"
 #include "assets.h"
+#include "settings.h"
 
 #include <esp_log.h>
 #include <esp_mn_iface.h>
@@ -96,6 +97,20 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     } else {
         models_ = models_list;
         ParseWakenetModelConfig();
+    }
+
+    // A phrase or threshold saved on the device (NVS namespace "wake_word")
+    // overrides the build's default, so it can change without a reflash.
+    Settings settings("wake_word", false);
+    std::string phrase = settings.GetString("phrase");
+    if (!phrase.empty()) {
+        commands_.clear();
+        commands_.push_back({phrase, phrase, "wake"});
+        ESP_LOGI(TAG, "Wake phrase from settings: %s", phrase.c_str());
+    }
+    int threshold = settings.GetInt("threshold", 0);
+    if (threshold > 0 && threshold < 100) {
+        threshold_ = threshold / 100.0f;
     }
 
     if (models_ == nullptr || models_->num == -1) {

@@ -1,5 +1,6 @@
 #include "coglet_mcp_tools.h"
 #include "coglet_controller.h"
+#include "coglet_voice.h"
 #include "application.h"
 #include "assets/lang_config.h"
 #include "board.h"
@@ -201,6 +202,24 @@ void RegisterCogletMcpTools() {
             bool on = p["on"].value<bool>();
             Application::GetInstance().SetListeningPaused(on);
             return std::string(on ? "Quiet mode on: not listening, not speaking." : "Quiet mode off.");
+        });
+    mcp.AddTool("self.voice.wake_word",
+        "The wake phrase. With neither argument, says what the robot listens for. phrase: new English words "
+        "(\"default\" restores the build's); threshold: 1-99, lower is more sensitive. A change reboots the robot, "
+        "which comes back released. Only the typed-phrase build can change it.",
+        PropertyList({Property("phrase", kPropertyTypeString, std::string("")),
+                      Property("threshold", kPropertyTypeInteger, 0, 0, 99)}),
+        [](const PropertyList& p) -> ReturnValue {
+            auto phrase = p["phrase"].value<std::string>();
+            int threshold = p["threshold"].value<int>();
+            if (!phrase.empty() && threshold > 0) {
+                throw std::invalid_argument("Set phrase or threshold, one at a time");
+            }
+            bool changed = false;
+            std::string out = CogletWakeWord(threshold > 0 ? "threshold " + std::to_string(threshold) : phrase,
+                                             &changed);
+            if (changed) AfterReply([] { esp_restart(); });
+            return out;
         });
     mcp.AddTool("self.voice.restart", "Close and reopen the voice session. This MCP connection drops for a few seconds.",
         PropertyList(), [](const PropertyList&) -> ReturnValue {

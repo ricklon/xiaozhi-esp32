@@ -69,7 +69,7 @@ static const char* TrimXiaoSerialLine(char* buf) {
     }
 
     const char* known_commands[] = {
-        "!reboot", "!status", "!camera", "!server", "!wifi", "!mic", "!speaker", "!stop", "!quiet", "!help"
+        "!reboot", "!status", "!camera", "!server", "!wifi", "!mic", "!speaker", "!stop", "!quiet", "!wake", "!help"
     };
     // Recover a command preceded by line noise (e.g. "\x1b[A!status"), but only
     // a known command followed by a space or end of line, so chat text with
@@ -138,11 +138,29 @@ static void XiaoServerHistoryAdd(const std::string& url) {
 
 // Optional board-local extension; existing profiles retain their handler.
 #if defined(CONFIG_BOARD_TYPE_COGLET) || defined(CONFIG_BOARD_TYPE_COGLET_C3)
+#include "coglet_voice.h"
+#include <stdexcept>
 bool CogletSerialCommand(const char* line);
 #endif
 static void HandleXiaoSerialLine(const char* buf) {
 #if defined(CONFIG_BOARD_TYPE_COGLET) || defined(CONFIG_BOARD_TYPE_COGLET_C3)
     if (CogletSerialCommand(buf)) return;
+
+    // --- !wake --- the wake phrase, as self.voice.wake_word sets it
+    if (strncmp(buf, "!wake", 5) == 0 && (buf[5] == ' ' || buf[5] == '\0')) {
+        bool changed = false;
+        try {
+            printf("\r\n%s\r\n\r\n", CogletWakeWord(buf[5] == ' ' ? buf + 6 : "", &changed).c_str());
+        } catch (const std::exception& e) {
+            printf("\r\nWake word: %s\r\n\r\n", e.what());
+        }
+        fflush(stdout);
+        if (changed) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+        }
+        return;
+    }
 #endif
     auto& ssid_manager = SsidManager::GetInstance();
 
@@ -498,6 +516,7 @@ static void HandleXiaoSerialLine(const char* buf) {
         printf("  !coglet state        -- robot diagnostics and calibration\r\n");
         printf("  !coglet release      -- latch servo outputs off (not a power cut)\r\n");
         printf("  !coglet scan         -- list devices answering on the servo I2C bus\r\n");
+        printf("  !wake [PHRASE|threshold N|default] -- the wake phrase (reboots to apply)\r\n");
 #endif
         printf("  !help                -- show this message\r\n");
         printf("  anything else        -- send as chat message\r\n\r\n");
