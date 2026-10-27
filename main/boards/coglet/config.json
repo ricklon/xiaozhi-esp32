@@ -13,7 +13,12 @@
                 "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
                 "CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT=y",
                 "CONFIG_SPIRAM_MODE_OCT=y",
-                "CONFIG_COGLET_CAMERA_UNCONFIRMED=y"
+                "CONFIG_COGLET_CAMERA_DETECT=y",
+                "CONFIG_SCCB_HARDWARE_I2C_PORT0=y",
+                "CONFIG_USE_AFE_WAKE_WORD=y",
+                "CONFIG_SR_WN_WN9_COMPUTER_TTS=y",
+                "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
+                "CONFIG_SEND_WAKE_WORD_DATA=n"
             ]
         }
     ]

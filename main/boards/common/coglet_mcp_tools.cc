@@ -1,8 +1,19 @@
 #include "coglet_mcp_tools.h"
 #include "coglet_controller.h"
 #include "application.h"
+#include "assets/lang_config.h"
+#include "board.h"
 #include "mcp_server.h"
+#include "settings.h"
+#include "ssid_manager.h"
+#include "wifi_manager.h"
 
+#include <esp_app_desc.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <cstdlib>
+#include <functional>
 #include <stdexcept>
 #include <string>
 
@@ -44,6 +55,55 @@ std::string AnimationList(bool eyes) {
         out += a.name;
     }
     return out;
+}
+
+// Runs work a second from now, after this call's MCP reply has gone out:
+// rebooting or closing the session first would swallow the reply.
+void AfterReply(std::function<void()> work) {
+    auto* job = new std::function<void()>(std::move(work));
+    xTaskCreate([](void* arg) {
+        auto* job = static_cast<std::function<void()>*>(arg);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        (*job)();
+        delete job;
+        vTaskDelete(nullptr);
+    }, "coglet_after", 4096, job, 2, nullptr);
+}
+
+// A decimal argument; xiaozhi's properties have no number type.
+float Decimal(const std::string& text, const char* name) {
+    char* end = nullptr;
+    float value = strtof(text.c_str(), &end);
+    if (text.empty() || end == nullptr || *end != '\0') {
+        throw std::invalid_argument(std::string("Argument must be a decimal string: ") + name);
+    }
+    return value;
+}
+
+std::string MicStatus() {
+    auto codec = Board::GetInstance().GetAudioCodec();
+    char text[96];
+    snprintf(text, sizeof(text), "Mic: %s, gain %.1f", codec->input_enabled() ? "on" : "muted", codec->input_gain());
+    return text;
+}
+
+const char* SessionState(const Application& app) {
+    if (app.IsListeningPaused()) return "quiet";
+    switch (app.GetDeviceState()) {
+        case kDeviceStateIdle: return "idle";
+        case kDeviceStateConnecting: return "connecting";
+        case kDeviceStateListening: return "listening";
+        case kDeviceStateSpeaking: return "speaking";
+        default: return "starting";
+    }
+}
+
+// The OTA check-in URL for a full URL or a bare host[:port], as !server does
+// for the default path.
+std::string ServerUrl(const std::string& arg) {
+    if (arg.rfind("http://", 0) == 0 || arg.rfind("https://", 0) == 0) return arg;
+    if (arg.find('/') != std::string::npos) throw std::invalid_argument("Give a full URL or a bare host");
+    return "http://" + arg + (arg.find(':') == std::string::npos ? ":8003" : "") + "/xiaozhi/ota/";
 }
 
 Property I(const char* n, int lo, int hi) { return Property(n, kPropertyTypeInteger, lo, hi); }
@@ -130,14 +190,109 @@ void RegisterCogletMcpTools() {
                 sda < 0 ? "scan" : "scan " + std::to_string(sda) + " " + std::to_string(scl));
         });
 
-    // Voice. Quiet keeps this session, and MCP with it, open.
-    McpServer::GetInstance().AddTool("self.voice.quiet",
+    // Voice, audio and the device. Names and arguments match the C3; optional
+    // arguments are strings here, empty meaning "leave as it is".
+    auto& mcp = McpServer::GetInstance();
+    mcp.AddTool("self.voice.quiet",
         "Quiet mode on or off. On: the mic and speaker stop and the robot neither listens nor speaks; this MCP "
         "connection stays up. Calibration mode turns it on.",
         PropertyList({Property("on", kPropertyTypeBoolean)}),
         [](const PropertyList& p) -> ReturnValue {
             bool on = p["on"].value<bool>();
             Application::GetInstance().SetListeningPaused(on);
-            return std::string(on ? "Quiet mode on: not listening, not speaking." : "Quiet mode off: listening resumed.");
+            return std::string(on ? "Quiet mode on: not listening, not speaking." : "Quiet mode off.");
+        });
+    mcp.AddTool("self.voice.restart", "Close and reopen the voice session. This MCP connection drops for a few seconds.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            AfterReply([] { Application::GetInstance().CloseSession(); });
+            return std::string("Restarting the voice session.");
+        });
+    mcp.AddTool("self.audio_speaker.test_tone", "Play a short tone through the speaker.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            Application::GetInstance().PlaySound(Lang::Sounds::OGG_SUCCESS);
+            return std::string("Playing a test tone.");
+        });
+    mcp.AddTool("self.audio_mic.status", "Mic mute state and gain.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue { return MicStatus(); });
+    mcp.AddTool("self.audio_mic.set",
+        "Mute or unmute the mic (muted: \"true\" or \"false\"), and/or set its gain (a decimal string). Leave "
+        "either empty to keep it.",
+        PropertyList({Property("muted", kPropertyTypeString, std::string("")),
+                      Property("gain", kPropertyTypeString, std::string(""))}),
+        [](const PropertyList& p) -> ReturnValue {
+            auto codec = Board::GetInstance().GetAudioCodec();
+            auto muted = p["muted"].value<std::string>();
+            auto gain = p["gain"].value<std::string>();
+            if (!muted.empty() && muted != "true" && muted != "false") {
+                throw std::invalid_argument("muted must be \"true\" or \"false\"");
+            }
+            float g = gain.empty() ? 0 : Decimal(gain, "gain");
+            if (!gain.empty() && (g < 0 || g > 64)) throw std::invalid_argument("Argument out of range: gain");
+            if (!muted.empty()) codec->EnableInput(muted == "false");
+            if (!gain.empty()) codec->SetInputGain(g);
+            return MicStatus();
+        });
+    mcp.AddTool("self.device.status", "Firmware, Wi-Fi, hub URL, voice session state and memory, as text.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            auto& wifi = WifiManager::GetInstance();
+            Settings settings("wifi", false);
+            std::string url = settings.GetString("ota_url");
+            if (url.empty()) url = std::string(CONFIG_OTA_URL) + " (default)";
+            size_t token = url.find("enrollment_token=");
+            if (token != std::string::npos) {
+                size_t end = url.find('&', token);
+                url.replace(token + 17, end == std::string::npos ? std::string::npos : end - token - 17, "<redacted>");
+            }
+            auto& app = Application::GetInstance();
+            char text[384];
+            snprintf(text, sizeof(text),
+                     "Firmware %s on coglet\nWi-Fi %s (%s, RSSI %d)\nHub %s\nSession %s\nCamera %s\nFree heap %lu bytes",
+                     esp_app_get_description()->version, wifi.GetSsid().c_str(), wifi.GetIpAddress().c_str(),
+                     wifi.GetRssi(), url.c_str(), SessionState(app),
+                     Board::GetInstance().GetCamera() ? "available" : "not available",
+                     (unsigned long)esp_get_free_heap_size());
+            return std::string(text);
+        });
+    mcp.AddTool("self.wifi.list", "Saved Wi-Fi networks.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            const auto& list = SsidManager::GetInstance().GetSsidList();
+            std::string out = list.empty() ? "No saved networks" : "";
+            for (size_t i = 0; i < list.size(); i++) {
+                out += (i ? "\n" : "") + std::to_string(i + 1) + ". " + list[i].ssid;
+            }
+            return out;
+        });
+    mcp.AddTool("self.wifi.add",
+        "Save a Wi-Fi network (2.4 GHz). It's used the next time the robot connects, after a reboot or a dropped "
+        "link.",
+        PropertyList({Property("ssid", kPropertyTypeString), Property("password", kPropertyTypeString)}),
+        [](const PropertyList& p) -> ReturnValue {
+            auto ssid = p["ssid"].value<std::string>();
+            if (ssid.empty() || ssid.size() > 32) throw std::invalid_argument("ssid must be 1 to 32 characters");
+            SsidManager::GetInstance().AddSsid(ssid, p["password"].value<std::string>());
+            return "Saved " + ssid;
+        });
+    mcp.AddTool("self.wifi.remove", "Forget a saved Wi-Fi network by its number in self.wifi.list.",
+        PropertyList({I("index", 1, 10)}), [](const PropertyList& p) -> ReturnValue {
+            auto& ssids = SsidManager::GetInstance();
+            int index = p["index"].value<int>();
+            if (index > (int)ssids.GetSsidList().size()) throw std::invalid_argument("No saved network with that number");
+            std::string ssid = ssids.GetSsidList()[index - 1].ssid;
+            ssids.RemoveSsid(index - 1);
+            return "Removed " + ssid;
+        });
+    mcp.AddTool("self.hub.set_server",
+        "Set the agent-hub check-in URL (or a bare host) and reboot. The robot reconnects to that hub.",
+        PropertyList({Property("url", kPropertyTypeString)}), [](const PropertyList& p) -> ReturnValue {
+            std::string url = ServerUrl(p["url"].value<std::string>());
+            Settings("wifi", true).SetString("ota_url", url);
+            AfterReply([] { esp_restart(); });
+            return std::string("Hub set; rebooting.");
+        });
+    // Registered before xiaozhi's own self.reboot, which the hub can't see.
+    mcp.AddTool("self.reboot", "Restart the robot. It comes back released, with the servo outputs off.",
+        PropertyList(), [](const PropertyList&) -> ReturnValue {
+            AfterReply([] { esp_restart(); });
+            return std::string("Rebooting.");
         });
 }

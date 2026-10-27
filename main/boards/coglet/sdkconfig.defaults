@@ -6,4 +6,12 @@ CONFIG_OTA_URL="http://<your-ota-server>/xiaozhi/ota/"
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT=y
 CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_COGLET_CAMERA_UNCONFIRMED=y
+CONFIG_COGLET_CAMERA_DETECT=y
+# The camera's SCCB takes I2C controller 0; the servos have controller 1.
+CONFIG_SCCB_HARDWARE_I2C_PORT0=y
+# Wake word: English "Computer". The session stays open while waiting for it.
+CONFIG_USE_AFE_WAKE_WORD=y
+CONFIG_SR_WN_WN9_COMPUTER_TTS=y
+CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n
+# The hub transcribes what follows the wake word, not the wake word itself.
+CONFIG_SEND_WAKE_WORD_DATA=n

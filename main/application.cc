@@ -937,17 +937,30 @@ void Application::SetListeningPaused(bool paused) {
     });
 }
 
-void Application::ReopenPausedSession() {
+void Application::OpenSessionWithoutListening() {
     Schedule([this]() {
-        if (!IsListeningPaused() || !keep_session_when_paused_ || !protocol_) {
+        if (!protocol_ || (IsListeningPaused() && !keep_session_when_paused_)) {
             return;
         }
         if (GetDeviceState() != kDeviceStateIdle || protocol_->IsAudioChannelOpened()) {
             return;
         }
-        ESP_LOGI(TAG, "Paused: reopening the session so MCP stays reachable");
+        ESP_LOGI(TAG, "Opening the session without listening, so MCP stays reachable");
         protocol_->CloseAudioChannel();
         protocol_->OpenAudioChannel();
+    });
+}
+
+void Application::CloseSession() {
+    Schedule([this]() {
+        if (GetDeviceState() == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+        }
+        // Unconditionally: a session past the receive timeout reads as closed
+        // but may still hold a live socket.
+        if (protocol_) {
+            protocol_->CloseAudioChannel();
+        }
     });
 }
 

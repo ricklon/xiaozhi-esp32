@@ -1014,15 +1014,21 @@ endmenu
 
 if BOARD_TYPE_COGLET
 choice COGLET_CAMERA_MODEL
-    prompt "Coglet fitted camera (confirm module marking first)"
-    default COGLET_CAMERA_UNCONFIRMED
-config COGLET_CAMERA_UNCONFIRMED
-    bool "Unconfirmed: camera disabled"
+    prompt "Coglet camera"
+    default COGLET_CAMERA_DETECT
+    help
+        Detect accepts whichever supported sensor answers (OV2640, OV3660 or
+        OV5640) and logs which one it found, so a module can be swapped
+        without a rebuild. Pin a model to refuse any other.
+config COGLET_CAMERA_DETECT
+    bool "Detect: OV2640, OV3660 or OV5640"
 config COGLET_CAMERA_OV2640
-    bool "Confirmed OV2640"
+    bool "OV2640 only"
 config COGLET_CAMERA_OV3660
-    bool "Confirmed OV3660"
+    bool "OV3660 only"
 config COGLET_CAMERA_OV5640
-    bool "Confirmed OV5640"
+    bool "OV5640 only"
+config COGLET_CAMERA_NONE
+    bool "No camera"
 endchoice
 endif

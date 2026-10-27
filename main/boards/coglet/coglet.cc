@@ -44,9 +44,11 @@ private:
         xTaskCreate(XiaoSerialInputTask, "serial_input", 4096, nullptr, 5, nullptr);
     }
 
+    // Detects the sensor by default, so a module can be swapped without a
+    // rebuild; a pinned model (menuconfig) refuses any other.
     void InitializeCamera() {
-#if CONFIG_COGLET_CAMERA_UNCONFIRMED
-        ESP_LOGW(TAG, "Camera disabled: confirm fitted model in menuconfig");
+#if CONFIG_COGLET_CAMERA_NONE
+        ESP_LOGI(TAG, "Camera: none configured");
         return;
 #else
         camera_config_t config = {};
@@ -67,29 +69,41 @@ private:
         config.pin_href    = CAMERA_PIN_HREF;
         config.pin_pclk    = CAMERA_PIN_PCLK;
         config.xclk_freq_hz = XCLK_FREQ_HZ;
+        // The user LED owns LEDC timer 1, channel 0; the camera clock takes
+        // timer 0, channel 1, so neither reconfigures the other.
         config.ledc_timer   = LEDC_TIMER_0;
-        config.ledc_channel = LEDC_CHANNEL_0;
+        config.ledc_channel = LEDC_CHANNEL_1;
         config.pixel_format = PIXFORMAT_JPEG;
         config.frame_size   = FRAMESIZE_QVGA;
         config.jpeg_quality = 12;
         config.fb_count     = 1;
         config.fb_location  = CAMERA_FB_IN_PSRAM;
         config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
+        // With SCCB pins given, the driver takes its I2C port from
+        // CONFIG_SCCB_HARDWARE_I2C_PORT0 (sdkconfig.defaults), not from here.
         config.sccb_i2c_port = 0;
         camera_ = new CogletCamera(config);
         auto* sensor = esp_camera_sensor_get();
+        int pid = sensor ? sensor->id.PID : 0;
+        const char* model = pid == OV2640_PID ? "OV2640" : pid == OV3660_PID ? "OV3660"
+                          : pid == OV5640_PID ? "OV5640" : nullptr;
 #if CONFIG_COGLET_CAMERA_OV2640
-        constexpr int expected = OV2640_PID;
+        bool accepted = pid == OV2640_PID;
 #elif CONFIG_COGLET_CAMERA_OV3660
-        constexpr int expected = OV3660_PID;
+        bool accepted = pid == OV3660_PID;
+#elif CONFIG_COGLET_CAMERA_OV5640
+        bool accepted = pid == OV5640_PID;
 #else
-        constexpr int expected = OV5640_PID;
+        bool accepted = model != nullptr;
 #endif
-        if (!sensor || sensor->id.PID != expected) {
-            ESP_LOGE(TAG, "Camera missing or PID differs from confirmed model");
+        if (!accepted) {
+            ESP_LOGE(TAG, "Camera: %s (PID 0x%x); camera off",
+                     sensor ? (model ? "not the configured model" : "unsupported sensor") : "none answered", pid);
             delete camera_;
             camera_ = nullptr;
+            return;
         }
+        ESP_LOGI(TAG, "Camera: %s (PID 0x%x)", model, pid);
 #endif
     }
 

@@ -140,8 +140,11 @@ public:
     // A paused board closes its session unless this is set. Coglet sets it:
     // its MCP server rides in the session, so quiet mode must keep it open.
     void SetKeepSessionWhenPaused(bool keep) { keep_session_when_paused_ = keep; }
-    // Paused with the session kept: reopen a dropped session, without listening.
-    void ReopenPausedSession();
+    // Opens the session if it's closed, without listening: for a board that
+    // keeps it open while paused, or that waits for a wake word with it open.
+    void OpenSessionWithoutListening();
+    // Closes the session; the board's own loop decides when to reopen it.
+    void CloseSession();
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
