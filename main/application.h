@@ -137,6 +137,11 @@ public:
     void SetListeningPaused(bool paused);
     void ToggleListeningPaused();
     bool IsListeningPaused() const { return listening_paused_.load(); }
+    // A paused board closes its session unless this is set. Coglet sets it:
+    // its MCP server rides in the session, so quiet mode must keep it open.
+    void SetKeepSessionWhenPaused(bool keep) { keep_session_when_paused_ = keep; }
+    // Paused with the session kept: reopen a dropped session, without listening.
+    void ReopenPausedSession();
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
@@ -180,6 +185,7 @@ private:
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     std::atomic<bool> listening_paused_{false};
+    std::atomic<bool> keep_session_when_paused_{false};
     std::atomic<bool> continuous_transcription_{false};
     std::atomic<bool> transcription_stopping_{false};
     std::atomic<bool> agent_hub_online_{false};

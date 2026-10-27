@@ -1,5 +1,6 @@
 #include "coglet_mcp_tools.h"
 #include "coglet_controller.h"
+#include "application.h"
 #include "mcp_server.h"
 
 #include <stdexcept>
@@ -76,17 +77,17 @@ void RegisterCogletMcpTools() {
         "Needs the robot engaged.", PropertyList({S("name")}), "animate", {"name"});
     Add("self.coglet.stop", "Stop any animation or servo test and hold the last commanded pose. Outputs stay on; use "
         "release to turn them off.", PropertyList(), "stop");
-    Add("self.coglet.release", "Turn every servo output off and latch it off until engage or builder. Doesn't cut "
+    Add("self.coglet.release", "Turn every servo output off and latch it off until engage or calibrate. Doesn't cut "
         "servo power: the rail switch does that.", PropertyList(), "release");
-    Add("self.coglet.state", "Robot state: released, builder, animation, servo test, per-role calibration and last "
+    Add("self.coglet.state", "Robot state: released, calibration mode, animation, servo test, per-role calibration and last "
         "commanded angles, and hardware errors." + window, PropertyList(), "state");
 
     // Modes.
     Add("self.coglet.engage", "Turn servo outputs on for normal motion. Needs every assigned servo calibrated and "
         "confirmed. Commands no pose by itself. Only from released.", PropertyList(), "engage");
-    Add("self.coglet.builder", "Turn servo outputs on for calibration and servo tests. Only from released. On this S3 "
-        "firmware it also pauses the voice, which closes this MCP session until !quiet off at the serial console.",
-        PropertyList(), "builder");
+    Add("self.coglet.calibrate", "Turn servo outputs on for calibration and servo tests. Puts the voice in quiet mode "
+        "(mic and speaker off; MCP stays connected) until it's turned off. Only from released.",
+        PropertyList(), "calibrate");
 
     // Calibration, one servo at a time.
     Add("self.coglet.fit", "Assign a fitted servo to its standard PCA9685 channel (base 0 through ear_right 8), "
@@ -99,24 +100,24 @@ void RegisterCogletMcpTools() {
     Add("self.coglet.lid_coupling", "Set how the top lids track the gaze: trim and coefficient, 0 to 1 each (decimal "
         "strings). Only while released.", PropertyList({S("trim"), S("coefficient")}), "lid_coupling",
         {"trim", "coefficient"});
-    Add("self.coglet.identify", "Wiggle a raw PCA9685 channel for about 1.4 s to see which part is on it. Builder mode "
+    Add("self.coglet.identify", "Wiggle a raw PCA9685 channel for about 1.4 s to see which part is on it. Calibration mode "
         "only.", PropertyList({I("channel", 0, 15)}), "identify", {"channel"});
-    Add("self.coglet.explore", "Start hunting a role's endpoints: centre it at 1500 us, then nudge. Builder mode only." +
+    Add("self.coglet.explore", "Start hunting a role's endpoints: centre it at 1500 us, then nudge. Calibration mode only." +
         roles, PropertyList({S("role")}), "explore", {"role"});
     Add("self.coglet.nudge", "Move the role being explored by up to 5 degrees (a decimal string), inside the hard "
-        "1000-2000 us bound. Builder mode only.", PropertyList({S("degrees")}), "nudge", {"degrees"});
+        "1000-2000 us bound. Calibration mode only.", PropertyList({S("degrees")}), "nudge", {"degrees"});
     Add("self.coglet.mark", "Record the explored position as the role's low or high endpoint (end: low or high). "
         "Clears its confirmation.", PropertyList({S("end")}), "mark", {"end"});
     Add("self.coglet.confirm", "Confirm a role's endpoints after someone has watched the servo reach both." + roles,
         PropertyList({S("role")}), "confirm", {"role"});
-    Add("self.coglet.save", "Save the calibration on the robot. Released or builder mode.", PropertyList(), "save");
+    Add("self.coglet.save", "Save the calibration on the robot. Released or calibration mode.", PropertyList(), "save");
     Add("self.coglet.export", "The full calibration and state as JSON, for a backup.", PropertyList(), "export");
     Add("self.coglet.servo", "Move one role to an angle (a decimal string, 0-180) inside its calibrated window. "
-        "Builder mode only." + roles, PropertyList({S("role"), S("degrees")}), "servo", {"role", "degrees"});
+        "Calibration mode only." + roles, PropertyList({S("role"), S("degrees")}), "servo", {"role", "degrees"});
     Add("self.coglet.jog", "Move one role by up to 5 degrees (a decimal string) from its last commanded angle, inside "
-        "its window. Builder mode only.", PropertyList({S("role"), S("degrees")}), "jog", {"role", "degrees"});
+        "its window. Calibration mode only.", PropertyList({S("role"), S("degrees")}), "jog", {"role", "degrees"});
     Add("self.coglet.test", "Servo test: sweep a role centre, low, high, centre (about 5 s), or with no role every "
-        "calibrated role in turn. Builder mode only. Stop or release ends it." + roles,
+        "calibrated role in turn. Calibration mode only. Stop or release ends it." + roles,
         PropertyList({Property("role", kPropertyTypeString, std::string(""))}), "test", {"role"});
     McpServer::GetInstance().AddTool("self.coglet.scan",
         "List the addresses answering on the servo I2C bus (the PCA9685 is 0x40). With sda and scl GPIOs (-1 for "
@@ -127,5 +128,16 @@ void RegisterCogletMcpTools() {
             if ((sda < 0) != (scl < 0)) throw std::invalid_argument("Give both sda and scl, or neither");
             return CogletController::Instance().Command(
                 sda < 0 ? "scan" : "scan " + std::to_string(sda) + " " + std::to_string(scl));
+        });
+
+    // Voice. Quiet keeps this session, and MCP with it, open.
+    McpServer::GetInstance().AddTool("self.voice.quiet",
+        "Quiet mode on or off. On: the mic and speaker stop and the robot neither listens nor speaks; this MCP "
+        "connection stays up. Calibration mode turns it on.",
+        PropertyList({Property("on", kPropertyTypeBoolean)}),
+        [](const PropertyList& p) -> ReturnValue {
+            bool on = p["on"].value<bool>();
+            Application::GetInstance().SetListeningPaused(on);
+            return std::string(on ? "Quiet mode on: not listening, not speaking." : "Quiet mode off: listening resumed.");
         });
 }

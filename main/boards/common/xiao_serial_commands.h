@@ -390,7 +390,7 @@ static void HandleXiaoSerialLine(const char* buf) {
 
     // --- !quiet ---
     // Pauses all local listening until toggled or rebooted, so the robot stops
-    // talking while a builder works on it. Servo calibration is impossible with
+    // talking while someone calibrates it. Servo calibration is impossible with
     // a voice agent answering room noise through the same speaker.
     if (strncmp(buf, "!quiet", 6) == 0 && (buf[6] == ' ' || buf[6] == '\0')) {
         const char* args = buf[6] == ' ' ? buf + 7 : "";

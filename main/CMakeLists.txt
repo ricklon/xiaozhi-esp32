@@ -917,7 +917,8 @@ if(CONFIG_BOARD_TYPE_COGLET OR CONFIG_BOARD_TYPE_COGLET_C3)
     endif()
     message(STATUS "Coglet controller: ${COGLET_CONTROLLER_DIR}")
     list(APPEND SOURCES "${COGLET_CONTROLLER_DIR}/coglet_controller.cc"
-                        "boards/common/coglet_mcp_tools.cc")
+                        "boards/common/coglet_mcp_tools.cc"
+                        "boards/common/coglet_voice.cc")
     list(APPEND INCLUDE_DIRS "${COGLET_CONTROLLER_DIR}")
 endif()
 

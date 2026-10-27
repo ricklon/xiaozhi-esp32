@@ -228,7 +228,12 @@ void Application::Run() {
                 protocol_->SetTranscriptionOnly(false);
             }
             SetDeviceState(kDeviceStateIdle);
-            Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+            if (IsListeningPaused()) {
+                // Paused means silent, error chimes included.
+                ESP_LOGW(TAG, "Error while paused: %s", last_error_message_.c_str());
+            } else {
+                Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+            }
         }
 
         if (bits & MAIN_EVENT_NETWORK_CONNECTED) {
@@ -696,6 +701,11 @@ void Application::InitializeProtocol() {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
+                    // A session kept open while paused may still get replies;
+                    // staying out of Speaking drops their audio.
+                    if (IsListeningPaused()) {
+                        return;
+                    }
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
@@ -904,7 +914,7 @@ void Application::SetListeningPaused(bool paused) {
                 protocol_->SendStopListening();
             }
 
-            if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            if (protocol_ && protocol_->IsAudioChannelOpened() && !keep_session_when_paused_) {
                 protocol_->CloseAudioChannel();
             }
             audio_service_.EnableVoiceProcessing(false);
@@ -924,6 +934,20 @@ void Application::SetListeningPaused(bool paused) {
             }
             display->ShowNotification("Listening resumed");
         }
+    });
+}
+
+void Application::ReopenPausedSession() {
+    Schedule([this]() {
+        if (!IsListeningPaused() || !keep_session_when_paused_ || !protocol_) {
+            return;
+        }
+        if (GetDeviceState() != kDeviceStateIdle || protocol_->IsAudioChannelOpened()) {
+            return;
+        }
+        ESP_LOGI(TAG, "Paused: reopening the session so MCP stays reachable");
+        protocol_->CloseAudioChannel();
+        protocol_->OpenAudioChannel();
     });
 }
 
