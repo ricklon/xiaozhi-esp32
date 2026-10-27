@@ -148,6 +148,20 @@ board_target() {
     python3 -c "import json; print(json.load(open('$cfg'))['target'])"
 }
 
+# The Coglet version (ricklon/coglet firmware/app/CMakeLists.txt), found the
+# way main/CMakeLists.txt finds the Coglet controller: COGLET_CONTROLLER_DIR,
+# this fork as Coglet's submodule, or a sibling ../coglet checkout.
+coglet_version() {
+    local f
+    for f in ${COGLET_CONTROLLER_DIR:+"$COGLET_CONTROLLER_DIR/../app/CMakeLists.txt"} \
+             "../app/CMakeLists.txt" "../coglet/firmware/app/CMakeLists.txt"; do
+        [ -f "$f" ] || continue
+        sed -n 's/^set(PROJECT_VER "\(.*\)")$/\1/p' "$f" | head -1
+        return 0
+    done
+    return 1
+}
+
 # Build a merged sdkconfig.defaults for this board and write it to $outfile.
 # Merge order (later entries win):
 #   1. sdkconfig.defaults           (project-wide base)
@@ -166,6 +180,20 @@ merge_defaults() {
         [ -f "sdkconfig.defaults.$target" ]                && cat "sdkconfig.defaults.$target"
         [ -f "$(board_dir "$board")/sdkconfig.defaults" ]  && cat "$(board_dir "$board")/sdkconfig.defaults"
     } > "$outfile"
+
+    # Coglet boards carry Coglet's version rather than this fork's, so the Web
+    # Programmer, !status and agent-hub's check-in all show the same number.
+    case "$board" in
+        coglet|coglet/*|coglet-c3)
+            local version
+            version=$(coglet_version) || true
+            if [ -n "$version" ]; then
+                printf '\nCONFIG_APP_PROJECT_VER_FROM_CONFIG=y\nCONFIG_APP_PROJECT_VER="%s"\n' "$version" >> "$outfile"
+            else
+                echo ">>> Coglet version not found; using this fork's PROJECT_VER" >&2
+            fi
+            ;;
+    esac
 
     # The K10 and Coglet C3 enroll through Agent Hub's public HTTPS host. Keep
     # the secret out of tracked defaults while allowing the same value used by
